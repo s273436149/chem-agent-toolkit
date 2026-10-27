@@ -21,6 +21,7 @@ JSON or YAML object. Only sources is required; YAML needs PyYAML. Unknown top-le
 | draft_only | false | Persist drafts without formal qualification; never an execution bypass to accepted |
 | runtime_requirements | {} | Candidate declarations with status, reason and verifiable source citations; conflicts stay unknown |
 | runtime | {} | Candidate binding/plan/options/resource_refs/constraints; absent plan invokes source-grounded planner |
+| runtime_defaults | {} | Runtime preparation settings shared by every candidate; merged under `runtime.<candidate>` (per-candidate keys win). Lets a normal creation fix provider options before discovery names the candidate |
 | revision_parents | {} | Explicit expected current revision for reviewed replacements; prevents accidental overwrite |
 
 Runtime preparation and resource references are described in [Docker execution](docker-execution.md)

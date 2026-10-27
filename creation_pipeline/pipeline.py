@@ -65,6 +65,23 @@ def _agent_reports(session, directory):
     return reports
 
 
+def runtime_spec_for(config, name):
+    """Per-candidate runtime preparation settings with the shared defaults underneath.
+
+    ``runtime_defaults`` exists so a normal creation can fix provider options before
+    discovery names the candidate. Per-candidate keys win; nested maps are merged one
+    level so one option cannot silently erase the rest.
+    """
+    merged = copy.deepcopy(config.get("runtime_defaults") or {})
+    override = config.get("runtime", {}).get(name) or {}
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = {**merged[key], **copy.deepcopy(value)}
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
+
+
 def runtime_gate_stops(config, runtime_receipt):
     """True when this batch forbids continuing past a failed Docker stage.
 
@@ -436,7 +453,7 @@ def build(config_path=None, state_root=None, *, plan_only=False, plan_path=None,
                     from creation_pipeline.runtime.preparation import prepare
                     from creation_pipeline.runtime.local import LocalExecutor
                     from creation_pipeline.runtime.service import execute_prepared
-                    runtime_spec = copy.deepcopy(runtime_override if runtime_override is not None else config.get("runtime", {}).get(name, {}))
+                    runtime_spec = copy.deepcopy(runtime_override if runtime_override is not None else runtime_spec_for(config, name))
                     runtime_spec.setdefault("options", {}).setdefault("model", session.model_name)
                     runtime_spec["options"].setdefault("transport", config["model"].get("transport", "default"))
                     runtime_spec["options"].setdefault("progress_watch", config["execution"].get("progress_watch", "terminate"))

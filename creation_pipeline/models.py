@@ -37,7 +37,7 @@ def load_config(path):
     if not isinstance(config, dict):
         raise ValueError("Configuration must be an object")
     allowed = {"task", "sources", "model", "limits", "checks", "environment", "intent", "notes", "http_only",
-               "prompt", "constraints", "execution", "network", "execute_generated_checks", "batch", "adoption", "draft_only", "runtime_requirements", "revision_parents", "runtime"}
+               "prompt", "constraints", "execution", "network", "execute_generated_checks", "batch", "adoption", "draft_only", "runtime_requirements", "revision_parents", "runtime", "runtime_defaults"}
     unknown = set(config) - allowed
     if unknown:
         raise ValueError(f"Unknown configuration fields: {sorted(unknown)}")
@@ -55,13 +55,19 @@ def load_config(path):
     config.setdefault("runtime_requirements", {})
     config.setdefault("revision_parents", {})
     config.setdefault("runtime", {})
+    config.setdefault("runtime_defaults", {})
     from creation_pipeline.runtime.preparation import validate_spec
     if not isinstance(config["runtime"], dict):
         raise ValueError("runtime must map candidate names to preparation settings")
+    if not isinstance(config["runtime_defaults"], dict):
+        raise ValueError("runtime_defaults must be an object shared by every candidate")
     for spec in config["runtime"].values():
         if not isinstance(spec, dict) or set(spec) - {"binding", "plan", "options", "resource_refs", "constraints"}:
             raise ValueError("Unsupported runtime configuration")
         validate_spec(spec)
+    # Shared defaults exist so a normal creation can fix provider options before the
+    # candidate name is known; a per-candidate spec overrides them.
+    validate_spec(config["runtime_defaults"])
     if not isinstance(config["revision_parents"], dict) or any(not isinstance(v, str) for v in config["revision_parents"].values()):
         raise ValueError("revision_parents must map candidate names to expected current revision IDs")
     if type(config["draft_only"]) is not bool or not isinstance(config["runtime_requirements"], dict):
