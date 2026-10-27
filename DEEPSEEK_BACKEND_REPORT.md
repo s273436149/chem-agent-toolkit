@@ -20,7 +20,7 @@
 | 离线测试 | 新增 **54** 个后端用例全通过；完整回归 **386 个测试 OK，3 个跳过**（仅 POSIX 用例） |
 | 在线验证 | **真实请求 0 次**。缺 `DEEPSEEK_API_KEY`，两次验证均 `blocked_config_invalid` |
 | 准确状态 | **适配已实现、离线通过、在线验证未执行**——不能说“换 DeepSeek 有效”，更不能说原超时根因已解决 |
-| 第二阶段完整验收 | **未启动**。除凭据外，Codex CLI 也不可用（见 §7），属阻断项，不以完整运行代替适配修复 |
+| 第二阶段完整验收 | **未启动**。Codex CLI 已找到并可在本次进程内使用；仍缺 DeepSeek 凭据/模型名，按规则停止（见 §7） |
 
 提交历史（本副本）：
 
@@ -233,18 +233,17 @@ python -m creation_pipeline build validation/deepseek-api/acceptance-input.json
 
 | 检查项 | 结果 |
 | --- | --- |
-| 第一阶段提交 | 存在且工作区干净（`58917da` → `43a69ce` → `8d6bc7b` → `d61362f`） |
+| 第一阶段提交 | 存在且工作区干净（`58917da` → `43a69ce` → `8d6bc7b` → `d61362f` → `55893da`） |
 | 离线回归 | `386 tests OK (skipped=3)` |
 | 小范围真实 planner 验证 | `blocked_config_invalid`，**0 请求**（缺凭据） |
+| 原案例验证 | 离线完整性检查与门禁彩排通过；`run` **未执行**（其前置条件是 DeepSeek 配置齐备，当前不满足） |
 | planner 使用 DeepSeek API | 配置显式 `backend=deepseek_api`；离线测试断言请求打到 API 端点且不含 Codex 模型名 |
 | NativeSession 使用 Codex CLI | 未改动：`review_snapshot`/`stage` 仍走 `codex_command()`，`model.backend` 仍强制 `codex_cli` |
-| **Codex CLI 可用性** | **不可用**：`codex_command()` 抛 `ValueError: Codex CLI is not installed or is not on PATH`；PATH 上的 `...\Programs\OpenAI\Codex\bin` 是指向 `~\.codex\packages\standalone\current\bin` 的 junction，目标不存在；`~/.codex/packages` 缺失；`npm ls -g` 只有 `pnpm` |
-| **DeepSeek 凭据** | **缺失**：`.env` 不存在，环境变量也没有 `DEEPSEEK_API_KEY`/`DEEPSEEK_MODEL` |
-| Docker | 可用：`29.8.2`，`linux/x86_64`（但无模型阶段即无法进入构建） |
+| Codex CLI 可用性 | **可用**：`C:\Users\27343\.codex\.sandbox-bin\codex.exe`（`codex-cli 0.159.2`）。把它加入**本次进程** PATH 后 `codex_command()` 返回该路径；`isolated_options('https','medium','default')` 生成 40 个参数并隔离两个 MCP 服务；`model_call` 用到的 `--ephemeral/--skip-git-repo-check/--sandbox/--output-schema/--json/--model/-c` 均存在。未改系统配置、未重装。`auth_mode=chatgpt` 且有 tokens，但未用模型调用探测其有效性 |
+| **DeepSeek 凭据** | **缺失**：`.env` 拷贝与工作区根均不存在，环境变量无 `DEEPSEEK_API_KEY`/`DEEPSEEK_MODEL`；`ANTHROPIC_*`（无密钥，模型名为 harness 别名）与 `~/.codex/auth.json`（Codex/OpenAI 认证）**未被当作替代品** |
+| Docker | 可用：`29.8.2`，`linux/x86_64` |
 
-结论：**首个阻断点在批次启动之前**——发现/编写/审阅需要 Codex CLI（缺失），规划/关联/诊断需要 DeepSeek 凭据（缺失）。任一缺失都无法从“正常创建”开始，也无法产出要求的逐次账本、构建身份与业务验收证据。
-
-因此按规则停止：不启动唯一一批，不用简化运行替代适配修复，不降级、不切换提供方、不续批。`first_blocking_point` 与 `next_step` 已写入 `validation/deepseek-api/launch-check.json`。
+结论：**唯一阻断项是 DeepSeek 凭据/模型名未配置**。按“缺少凭据或模型名时停止”的要求，未执行原案例 `run`，未启动唯一一批，0 次模型调用、0 次构建。Codex CLI 的旧阻断（PATH junction 指向不存在的目标）已通过“仅在本次进程 PATH 加入已核实可用的目录”解决，属规则允许范围。`first_blocking_point` 与 `next_step` 写入 `validation/deepseek-api/launch-check.json`。
 
 ---
 
