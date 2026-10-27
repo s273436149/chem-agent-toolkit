@@ -10,13 +10,24 @@ One skill may call multiple tools for one coherent objective. Separate capabilit
 
 ## Files
 
+The package is a closed layout. `SKILL.md` is the only file at the top level; every
+other delivered file must live under one of the five role directories:
+
 ```text
 capability-name/
   SKILL.md
-  references/           # conditional detail
+  references/           # conditional detail, licence and notice text
   scripts/              # necessary source-grounded executable support
-  assets/               # necessary small inputs/templates
+  examples/             # small worked examples kept out of SKILL.md
+  resources/            # data, fixtures or templates the tool reads
+  assets/               # necessary small inputs/templates for presentation
 ```
+
+A file outside those directories (for example a top-level `LICENSES.txt`,
+`LICENSE`, `README.md` or an upstream module copy) is refused by the delivery
+validator and the candidate fails rather than being repaired silently. Put licence
+or attribution text in `references/LICENSE.txt` (or another `references/` file) and
+link it from SKILL.md when the user needs it.
 
 SKILL.md contains the normal path, decision-changing boundaries, essential prerequisites, usable example and minimum result checks. Long parameter details or uncommon modes may move to conditionally linked references. No required headings or fixed length. Use compact actual parameter/key lists or tables when they help. Do not copy complete API references or hide common-path caveats in optional reading.
 

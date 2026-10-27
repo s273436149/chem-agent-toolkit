@@ -16,8 +16,7 @@ Every skill must convey these four kinds of information, with flexible organizat
 4. **Result interpretation/checks.** Explain the minimum tool-specific usable-result checks,
    meaningful empty outcomes and failure signals. Execution is not scientific validity.
 
-One file is enough when adequate. Conditional references/scripts/assets are allowed; link them
-with their purpose and when they are needed. Keep normal-path correctness in the main file.
+One file is enough when adequate. Conditional references/scripts/examples/resources/assets are allowed, but only inside those role directories (`SKILL.md` is the sole top-level file; licence and notice text belongs in `references/`). Link them with their purpose and when they are needed. Keep normal-path correctness in the main file.
 No mandatory chapter template, length target, file quota or author coverage quotations.
 Add content only when it helps selection, correct execution or interpretation. Omit generic
 boilerplate, build logs, internal evidence IDs and verification verdicts from runtime instructions.
