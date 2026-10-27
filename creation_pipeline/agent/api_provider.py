@@ -30,7 +30,24 @@ AUTHOR_FILES = {
               'properties': {'path': {'type': 'string'}, 'content': {'type': 'string'}},
               'required': ['path', 'content']},
 }
+# The execution requirement is a record, not a sentence: contracts.requirement()
+# rejects anything else, which blocked run 16 after a correct authoring turn.
+AUTHOR_REQUIREMENT = {
+    'type': 'object', 'additionalProperties': False,
+    'properties': {'status': {'type': 'string', 'enum': ['required', 'not_required', 'unknown']},
+                   'reason': {'type': 'string'},
+                   'citations': {'type': 'array', 'items': {
+                       'type': 'object', 'additionalProperties': False,
+                       'properties': {'source_id': {'type': 'string'},
+                                      'path': {'type': 'string'},
+                                      'quote': {'type': 'string'}},
+                       'required': ['source_id', 'path', 'quote']}}},
+    'required': ['status', 'reason', 'citations'],
+}
 AUTHOR_EXTRA = ('files', 'tests', 'issues', 'notes', 'entry', 'runtime_requirement')
+AUTHOR_PROPERTIES = {'files': AUTHOR_FILES, 'tests': {'type': 'array'}, 'issues': {'type': 'array'},
+                     'notes': {'type': 'array'}, 'entry': {'type': 'object'},
+                     'runtime_requirement': AUTHOR_REQUIREMENT}
 AUTHOR_INSTRUCTIONS = (
     '\nAPI PROVIDER MODE. You have no tools and cannot read files: every needed material is '
     'inline in this prompt. Do not claim to have read anything that is not shown here. '
@@ -38,6 +55,9 @@ AUTHOR_INSTRUCTIONS = (
     'files as files:[{path, content}] with UTF-8 text content; SKILL.md is the only top-level '
     'file and every other path starts with scripts/, references/, examples/, resources/ or '
     'assets/. Also return tests, issues, notes and (when you declare one) entry as usual. '
+    'runtime_requirement is an OBJECT {status: required|not_required|unknown, reason, '
+    'citations:[{source_id, path, quote}]}; every quote must be copied verbatim from the '
+    'source text below and a required status needs at least one citation. '
     'Source quotes you cite must be copied verbatim from the source text below.\n')
 PROVIDER_INSTRUCTIONS = {
     'discovery': ('\nAPI PROVIDER MODE. You have no tools and cannot read files: the resource '
@@ -65,9 +85,9 @@ def author_schema(schema):
     schema = json.loads(json.dumps(schema))
     properties = schema.setdefault('properties', {})
     for name in AUTHOR_EXTRA:
-        properties.setdefault(name, {'type': 'array'} if name in ('files', 'tests', 'issues', 'notes')
-                              else {'type': 'object'} if name == 'entry' else {'type': 'string'})
+        properties.setdefault(name, AUTHOR_PROPERTIES[name])
     properties['files'] = AUTHOR_FILES
+    properties['runtime_requirement'] = AUTHOR_REQUIREMENT
     required = schema.setdefault('required', [])
     for name in ('files',):
         if name not in required:

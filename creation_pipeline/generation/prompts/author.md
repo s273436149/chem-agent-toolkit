@@ -35,7 +35,10 @@ files are allowed when justified and provenance is understood. Remove obsolete p
 Do not leave temporary files in the runtime package. Do not execute programs unless permitted.
 
 Save progress as files, not one huge final response. When the package is complete, write
-metadata_path JSON containing tests, issues and notes (arrays; empty is allowed). Checks should
+metadata_path JSON containing tests, issues and notes (arrays; empty is allowed).
+runtime_requirement is an object {status: required|not_required|unknown, reason,
+citations: [{source_id, path, quote}]}; quotes must be verbatim from the source and a
+required status needs at least one citation. Checks should
 exercise actual delivered examples/scripts, use source-grounded expected results and relevant
 boundaries; do not invent a check simply to satisfy a template. Each test has name, argv, cwd,
 expected_exit, stdout_contains and/or json_equals/artifacts, evidence, purpose, kind.
