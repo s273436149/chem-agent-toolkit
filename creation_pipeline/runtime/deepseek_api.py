@@ -79,6 +79,7 @@ MIN_MAX_TOKENS = 1
 MAX_MAX_TOKENS = 393216
 DEFAULT_MAX_TOKENS = 65536  # thinking-mode default is 64K; stated explicitly
 MAX_RETRIES = 3
+MAX_CONNECT_RETRIES = 2
 
 # The provider maps these requested efforts onto its own ladder. The mapping is a
 # documented compatibility shim, not an equivalence claim, so both values are kept.
@@ -196,7 +197,7 @@ class Settings:
     """Resolved, ready-to-use call settings. ``api_key`` is never persisted."""
 
     def __init__(self, *, api_key, scheme, host, port, prefix, endpoint_kind, model,
-                 max_output_tokens, stream, retries, timeout, reasoning_effort,
+                 max_output_tokens, stream, retries, connect_retries, timeout, reasoning_effort,
                  thinking, effort_sent, effort_note, service_tier, progress_timeout):
         self.api_key = api_key
         self.scheme = scheme
@@ -209,6 +210,7 @@ class Settings:
         self.max_output_tokens = max_output_tokens
         self.stream = stream
         self.retries = retries
+        self.connect_retries = connect_retries
         self.timeout = timeout
         self.reasoning_effort = reasoning_effort
         self.thinking = thinking
@@ -276,6 +278,14 @@ def resolve(model=None, *, timeout, options=None, environ=None, dotenv=None):
     if type(retries) is not int or not 0 <= retries <= MAX_RETRIES:
         raise ApiConfigError('retries must be an integer between 0 and %d' % MAX_RETRIES)
 
+    # A connection that never opened cannot have reached the model, so retrying it
+    # cannot duplicate model work. This is separate from ``retries`` (which is a
+    # model-request retry) and is bounded the same way.
+    connect_retries = options.get('connect_retries', 0)
+    if type(connect_retries) is not int or not 0 <= connect_retries <= MAX_CONNECT_RETRIES:
+        raise ApiConfigError('connect_retries must be an integer between 0 and %d'
+                             % MAX_CONNECT_RETRIES)
+
     stream = options.get('stream', True)
     if type(stream) is not bool:
         raise ApiConfigError('stream must be a boolean')
@@ -309,7 +319,7 @@ def resolve(model=None, *, timeout, options=None, environ=None, dotenv=None):
         api_key=api_key, scheme=scheme, host=host, port=port, prefix=prefix,
         endpoint_kind='official' if official else 'custom',
         model=configured_model, max_output_tokens=max_tokens, stream=stream,
-        retries=retries, timeout=timeout, reasoning_effort=requested_effort,
+        retries=retries, connect_retries=connect_retries, timeout=timeout, reasoning_effort=requested_effort,
         thinking=thinking, effort_sent=effort_sent, effort_note=EFFORT_NOTE,
         service_tier=options.get('service_tier'),
         progress_timeout=options.get('progress_timeout'))
@@ -380,7 +390,11 @@ def _ledger(settings, attempts):
     return {'attempts': attempts, 'request_count': len(attempts),
             'sdk_implicit_retries': 'none (no SDK used)',
             'retry_policy': {'configured': settings.retries,
-                             'counted_in_total_deadline': True}}
+                             'counted_in_total_deadline': True},
+            # A connect retry is a transport retry, never a second model request.
+            'connect_retries': sum(1 for item in attempts if item.get('connect_retry')),
+            'connect_retry_policy': {'configured': settings.connect_retries,
+                                     'scope': 'only when the TCP/TLS connection never opened'}}
 
 
 # ---- transport ----------------------------------------------------------------
@@ -878,6 +892,7 @@ def call(prompt, schema, model, *, timeout, audit_dir=None, options=None, reason
         'timeout_seconds': settings.timeout,
         'deadline_scope': 'connect, send, read, stream consumption and all configured retries',
         'retries': settings.retries,
+        'connect_retries': settings.connect_retries,
         'sdk': 'none (stdlib http.client); no implicit SDK retries exist',
         'request_params': recorded,
         'requested_settings': {'reasoning_effort': settings.reasoning_effort,
@@ -906,9 +921,17 @@ def call(prompt, schema, model, *, timeout, audit_dir=None, options=None, reason
 
     attempts = []
     last_error = None
-    for attempt in range(settings.retries + 1):
-        if attempt:
-            pause = min(1.0 * attempt, max(0.0, deadline - time.monotonic()))
+    connect_retries_used = 0
+    retries_used = 0
+    attempt = 0
+    while True:
+        if retries_used:
+            pause = min(1.0 * retries_used, max(0.0, deadline - time.monotonic()))
+            if pause <= 0:
+                break
+            time.sleep(pause)
+        elif connect_retries_used:
+            pause = min(0.5 * connect_retries_used, max(0.0, deadline - time.monotonic()))
             if pause <= 0:
                 break
             time.sleep(pause)
@@ -925,9 +948,11 @@ def call(prompt, schema, model, *, timeout, audit_dir=None, options=None, reason
         connection = None
         response = None
         sock = None
+        connected = False
         try:
             connection = _connection(settings, deadline)
             connection.connect()                       # DNS + TCP + TLS, all deadline-bounded
+            connected = True
             # Capture the live socket here: getresponse() drops connection.sock for a
             # Connection: close response, and every later timeout must still be armed.
             sock = getattr(connection, 'sock', None)
@@ -1000,8 +1025,11 @@ def call(prompt, schema, model, *, timeout, audit_dir=None, options=None, reason
                             'model_request_invalid', 'model_config_invalid'):
                 # Retrying a credential, balance or request-shape failure cannot help.
                 break
-            if time.monotonic() >= deadline:
-                break
+            if retries_used < settings.retries:
+                retries_used += 1
+                attempt += 1
+                continue
+            break
         except (ssl.SSLError, OSError, http.client.HTTPException, socket.timeout) as exc:
             # A socket timeout was armed from the remaining budget, so once it fires
             # the total deadline has expired: that is a deadline verdict, not a plain
@@ -1019,7 +1047,20 @@ def call(prompt, schema, model, *, timeout, audit_dir=None, options=None, reason
             attempts.append(record)
             if destination:
                 _save(settings, destination, 'attempts.json', _ledger(settings, attempts))
-            if time.monotonic() >= deadline:
+            if (not expired and not connected and not record.get('sent_seconds')
+                    and connect_retries_used < settings.connect_retries):
+                # The connection never opened, so no request reached the provider and
+                # retrying cannot duplicate model work. Anything after a successful
+                # connect (or a deadline verdict) is never retried here.
+                connect_retries_used += 1
+                record['connect_retry'] = True
+                attempt += 1
+                continue
+            if not expired and retries_used < settings.retries:
+                retries_used += 1
+                attempt += 1
+                continue
+            if expired or retries_used >= settings.retries:
                 break
         finally:
             if response is not None:

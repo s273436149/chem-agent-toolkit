@@ -59,17 +59,18 @@ DEFAULTS = dict(model=None, max_attempts=None, total_seconds=None,
                 # ``model`` stays the native Agent/Codex model identity; ``api_model``
                 # is the API provider's model and is never borrowed across providers.
                 backend="codex_cli", api_model=None,
-                api_retries=0, api_max_output_tokens=65536, api_stream=True)
+                api_retries=0, api_connect_retries=0, api_max_output_tokens=65536, api_stream=True)
 
 # Documented DeepSeek request bounds, mirrored here so configuration is rejected
 # before a request instead of after one.
 API_MAX_OUTPUT_TOKENS = 393216
 API_MAX_RETRIES = 3
+API_MAX_CONNECT_RETRIES = 2
 
 
 def api_options(opts):
     """Project planner options onto the API backend parameters the caller controls."""
-    return {'retries': opts.get('api_retries', 0),
+    return {'retries': opts.get('api_retries', 0), 'connect_retries': opts.get('api_connect_retries', 0),
             'max_output_tokens': opts.get('api_max_output_tokens'),
             'stream': opts.get('api_stream', True)}
 
@@ -109,6 +110,12 @@ def options(settings):
                             "there is no automatic backend fallback")
     if type(result['api_retries']) is not int or not 0 <= result['api_retries'] <= API_MAX_RETRIES:
         raise PlanningError("api_retries must be an integer between 0 and %d" % API_MAX_RETRIES)
+    # A connect retry never reaches the model: it is counted separately and bounded
+    # by the same total deadline.
+    if (type(result["api_connect_retries"]) is not int
+            or not 0 <= result["api_connect_retries"] <= API_MAX_CONNECT_RETRIES):
+        raise PlanningError("api_connect_retries must be an integer between 0 and %d"
+                            % API_MAX_CONNECT_RETRIES)
     if type(result['api_max_output_tokens']) is not int or not 1 <= result['api_max_output_tokens'] <= API_MAX_OUTPUT_TOKENS:
         raise PlanningError("api_max_output_tokens must be an integer between 1 and %d" % API_MAX_OUTPUT_TOKENS)
     if type(result['api_stream']) is not bool:

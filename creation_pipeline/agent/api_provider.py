@@ -180,7 +180,8 @@ def call(config, prompt, schema, timeout, audit_dir, progress_timeout=None):
     try:
         answer, receipt = deepseek_api.call(
             prompt, schema, model, timeout=timeout, audit_dir=audit_dir,
-            options={'retries': 0, 'max_output_tokens': MAX_OUTPUT_TOKENS, 'stream': True},
+            options={'retries': 0, 'max_output_tokens': MAX_OUTPUT_TOKENS, 'stream': True,
+                     'connect_retries': (config.get('model') or {}).get('api_connect_retries') or 0},
             reasoning_effort=reasoning, service_tier=tier,
             progress_timeout=progress_timeout)
     except deepseek_api.ApiConfigError as exc:
