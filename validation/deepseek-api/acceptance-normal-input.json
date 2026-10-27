@@ -28,7 +28,7 @@
     "progress_watch": "observe"
   },
   "limits": {
-    "model_calls": 12,
+    "model_calls": 16,
     "model_timeout": 600,
     "total_seconds": 3600,
     "agent_progress_timeout": null,
@@ -61,5 +61,5 @@
       "deepseek-api"
     ]
   },
-  "notes": "Run 14+: native discovery/author/review run as single-shot DeepSeek calls (model.backend=deepseek_api, api_model=deepseek-v4-pro) because the Codex CLI account is rate-limited; the structured association/planning/diagnosis calls already use the DeepSeek API. Codex remains the default: switching model.backend back to codex_cli restores the native CLI turns with no other change. Up to three fresh rounds, 12 admitted calls each, 600 s per call, 3600 s per round, api_retries=0, no fallback, no probe outside the budget, no restart or resume of a failed round. pin_base_image=true resolves and freezes the base digest. Any Docker build or business acceptance failure stops the round. A connect-phase-only retry (api_connect_retries=1) is allowed because a connection that never opened cannot have reached the model; model-request retries stay api_retries=0."
+  "notes": "Operator-authorised envelope for the current debugging rounds: up to 16 admitted model calls per round, 600 s per call, 3600 s per round, api_retries=0 (model-request retries), api_connect_retries=1 (a connection that never opened cannot have reached the model), no fallback, no probe outside the budget, no restart or resume of a failed round. Native discovery/author/review run as single-shot DeepSeek calls (model.backend=deepseek_api) because the Codex CLI account is rate-limited; switching model.backend back to codex_cli restores the CLI turns. Structured association/planning/diagnosis use the DeepSeek API. pin_base_image=true resolves and freezes the base digest."
 }

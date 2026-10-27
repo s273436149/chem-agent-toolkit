@@ -153,10 +153,20 @@ def _candidate(session, config, entity, bundle, work, allow_generated, initial_f
                             k: proposed_tests[n].get(k) for k in ("expected_exit", "stdout_contains", "json_equals", "artifacts")}]
                     record["checks"] = reports
                     if any(r["status"] == "fail" for r in reports) or scoped["_oracle_changes"]:
-                        final_review = review(session, entity, artifact, reports, scoped)
-                        seen = {r.get("verification_id") for r in reports if r.get("verification_id")}
-                        reports += [r for r in _agent_reports(session, directory) if r.get("verification_id") not in seen]
-                        reports = [r for r in reports if r["name"] != "content_review"] + [final_review]
+                        # A second review is only worth a model call when new evidence
+                        # appeared after the first one (checks ran, immutability failed).
+                        # When the first review itself failed, re-reviewing the same
+                        # state adds nothing and used to double the cost of every
+                        # author repair cycle (run 25 spent its whole budget that way).
+                        fresh_evidence = (pre_review is None or pre_review.get("status") == "pass"
+                                          or len(_agent_reports(session, directory)) > 0)
+                        if fresh_evidence:
+                            final_review = review(session, entity, artifact, reports, scoped)
+                            seen = {r.get("verification_id") for r in reports if r.get("verification_id")}
+                            reports += [r for r in _agent_reports(session, directory) if r.get("verification_id") not in seen]
+                            reports = [r for r in reports if r["name"] != "content_review"] + [final_review]
+                        else:
+                            final_review = pre_review
                         if final_review["status"] == "pass":
                             for report in reports:
                                 if report.get("possible_environment_gap") and report["name"] in final_review.get("execution_gaps", []):
