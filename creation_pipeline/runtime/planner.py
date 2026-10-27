@@ -275,14 +275,34 @@ def patch_plan(base, answer, locked):
             else:raise TypeError('Patch parent is not an object/array')
         except (ValueError,KeyError,IndexError,TypeError) as exc:
             raise PlanningError('Invalid plan patch '+raw+': '+str(exc)) from exc
+    # The unchanged plan schema still applies. A patch that writes a structured
+    # value into a text-typed field (acceptance_json, case_json, ...) is an invalid
+    # patch and must become a repair round, not an unhandled TypeError downstream.
+    try:
+        jsonschema.validate({"action": "plan", "requested_files": [], "reason": "",
+                             "plan": copy.deepcopy(result)}, PLAN_SCHEMA)
+    except jsonschema.ValidationError as exc:
+        raise PlanningError('Patched plan schema error: ' + str(exc.message)[:300]) from exc
     if not locked:
-        old_policy = json.loads(base.get('acceptance_json', '{}'))
-        new_policy = json.loads(result.get('acceptance_json', '{}'))
+        old_policy = _json_field(base, 'acceptance_json')
+        new_policy = _json_field(result, 'acceptance_json')
         if (not set(old_policy.get('purposes', [])) <= set(new_policy.get('purposes', []))
                 or not {o['id'] for o in old_policy.get('operations', [])} <= {o['id'] for o in new_policy.get('operations', [])}
                 or not {t['name'] for t in base.get('tests', [])} <= {t['name'] for t in result.get('tests', [])}):
             raise PlanningError('Pre-lock repair cannot remove promised purposes, operations or tests')
     return result
+
+
+def _json_field(plan, field):
+    """Decode a plan field that the schema keeps as JSON text."""
+    value = plan.get(field, '{}')
+    if not isinstance(value, str):
+        raise PlanningError('Plan field %s must stay JSON text, got %s'
+                            % (field, type(value).__name__))
+    try:
+        return json.loads(value)
+    except ValueError as exc:
+        raise PlanningError('Plan field %s is not valid JSON: %s' % (field, exc)) from exc
 
 
 def material_priority(path, hint=None):
