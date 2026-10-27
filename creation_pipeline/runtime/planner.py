@@ -544,17 +544,19 @@ input_contract {status, ...} in exactly one of three states. Every operation dec
 its own input_contract; a required operation needs one rejection case per named check,
 while none_documented and not_applicable operations need none.
 - required: the caller, the delivered interface (a wrapper's own error branch counts)
-  or the source states a constraint. Give constraint and named checks, and one real
-  rejection case per check. Upstream silence never waives a delivered promise; cite
-  the delivered entry file when that is the basis.
+  or the source states a constraint. Give constraint and at least one named check,
+  plus one real rejection case per check. Upstream silence never waives a delivered
+  promise; cite the delivered entry file when that is the basis. If no checkable
+  predicate can be expressed for a stated constraint, that is a blocker: report the
+  missing predicate instead of declaring required with no checks.
 - none_documented: no examined material and no promise declares a contract. Give
   reason, scope, limitation, checked:[{source_path, sha256}] naming the examined
   materials with their fingerprints, and review:{status:"confirmed", reviewer,
   materials_sha256} bound to that list, from an independent review that saw them. A
   quotation is optional context (context:{source_path, source_quote}), never proof of
-  absence. It waives only an invented rejection expectation and is reported as a
-  validation gap; it never waives a requirement stated by the caller, the delivered
-  interface or the source.
+  absence. It names no check and needs no rejection case; it waives only an invented
+  rejection expectation and is reported as a validation gap; it never waives a
+  requirement stated by the caller, the delivered interface or the source.
 - not_applicable: the operation has no caller-supplied business input; give reason.
   A fixed-example tool need not invent an input interface; an input-taking tool is
   never exempt this way.

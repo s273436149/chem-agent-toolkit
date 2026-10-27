@@ -214,12 +214,21 @@ def contracts(plan, cases, index, source, *, check_consistency=True):
             state = (operation.get('input_contract') or {}).get('status')
             if state is not None and state != 'required' and selected:
                 raise ValueError('Operation checks describe a constraint, so that operation must be required')
-            if state == 'not_applicable':
-                # Nothing to check when the operation has no caller-supplied input.
+            if state in ('not_applicable', 'none_documented'):
+                # No rejection contract is claimed for this operation, so it names no
+                # check. A declared absence is reported as a validation gap instead.
                 if selected is None:
                     selected = operation['checks'] = []
                 if not isinstance(selected, list) or not set(selected) <= checks.keys():
                     raise ValueError('Operation checks must name declared input checks')
+                if selected:
+                    raise ValueError('A ' + state + ' operation declares no check; remove its checks or '
+                                     'declare the operation required')
+            elif state == 'required':
+                if not isinstance(selected, list) or not selected or not set(selected) <= checks.keys():
+                    raise ValueError('A required operation needs at least one named check (and a passing '
+                                     'rejection case for it); if no predicate is expressible, declare the '
+                                     'operation none_documented or block with the missing predicate')
             elif not isinstance(selected, list) or not selected or not set(selected) <= checks.keys():
                 raise ValueError('Each input operation must apply named input checks; no per-case exemptions')
             if not operation.get('purposes') or not set(operation['purposes']) <= set(policy['purposes']):

@@ -249,6 +249,25 @@ def render(source, target, plan, cases, base_image_pin=None):
     (target / ".dockerignore").write_text("__pycache__/\n*.pyc\n", encoding="utf-8")
 
 
+def declared_checks(payload, limit=40):
+    """Compact view of the checks the delivered interface already promises."""
+    definitions = payload if isinstance(payload, dict) else {}
+    if 'author_tests' in definitions:
+        definitions = definitions['author_tests']
+    if not isinstance(definitions, dict):
+        return []
+    result = []
+    for origin in ('configured', 'generated', 'reviewed'):
+        for test in (definitions.get(origin) or []):
+            if not isinstance(test, dict) or len(result) >= limit:
+                continue
+            result.append({'origin': origin, 'name': test.get('name'),
+                           'expected_exit': test.get('expected_exit', 0),
+                           'purpose': test.get('purpose'),
+                           'argv': [str(item)[:120] for item in (test.get('argv') or [])][:8]})
+    return result
+
+
 def pin_base_image(record, plan, opts, executor):
     """The digest a pinned build must reuse, reused across revisions of one reference.
 
@@ -376,6 +395,17 @@ def prepare(record, package, sources, workspace, spec, executor, call_guard=None
                     'do not generate or alter business code. Invocation contract: ' + binding['invocation'],
                     'Existing author checks are additionally locked and executed against the actual Markdown. ' +
                     json.dumps(d['inputs']['acceptance']['payload'], ensure_ascii=False)]
+            else:
+                declared = declared_checks(d['inputs']['acceptance']['payload'])
+                if declared:
+                    # The planner must know which rejection behaviour the delivered
+                    # interface already promises; otherwise it cannot express a check
+                    # for a constraint the author's own checks assert.
+                    entry_constraints.append(
+                        'Author-declared checks are locked and executed as delivered cases. A declared check '
+                        'with a nonzero expected exit means that operation is required and needs a named check '
+                        'plus a matching rejection case. Declared checks: '
+                        + json.dumps(declared, ensure_ascii=False))
             p, index, _ = propose(source, binding, target / "planning", planning_opts, entry_constraints, spec.get("locked_cases"),
                                   feedback=spec.get('feedback'), call_guard=counted_call_guard,
                                   previous=spec.get('previous_plan'), anchors=anchors)
