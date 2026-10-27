@@ -308,7 +308,7 @@ def build(config_path=None, state_root=None, *, plan_only=False, plan_path=None,
             "sources": sources.manifest(), "evidence": sources.evidence, "source_errors": sources.errors,
             "specifications": specifications()})
         config.setdefault("_deadline", time.monotonic() + bound(config["limits"]["total_seconds"]))
-        if config["model"]["backend"] != "codex_cli":
+        if config["model"]["backend"] not in ("codex_cli", "deepseek_api"):
             raise ValueError("Saved API/Ollama runs are not executable in the Agent-only pipeline")
         config["draft_only"] = draft_only or config.get("draft_only", False)
         config['_docker_checks'] = True
