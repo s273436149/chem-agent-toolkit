@@ -523,6 +523,24 @@ def _coerce_for_pointer(value, parts):
     return value
 
 
+def normalize_text_fields(plan):
+    """Encode a full plan's JSON-text fields supplied as objects or arrays.
+
+    The patch protocol has always accepted either form for ``acceptance_json`` and
+    ``tests[].case_json``; a full plan must behave identically, otherwise the same
+    content is a schema error in one path and valid in the other (run 12). Only the
+    encoding is normalized here: every semantic gate still runs on the result.
+    """
+    if not isinstance(plan, dict):
+        return plan
+    if 'acceptance_json' in plan:
+        plan['acceptance_json'] = _as_json_text(plan['acceptance_json'], 'acceptance_json')
+    tests = plan.get('tests')
+    if isinstance(tests, list):
+        plan['tests'] = [_coerce_test(item) if isinstance(item, dict) else item for item in tests]
+    return plan
+
+
 def material_priority(path, hint=None):
     name=PurePosixPath(path).name.lower();depth=path.count('/')
     if path==hint:return (0,depth,path)
@@ -631,7 +649,9 @@ The authoritative rules and required fields for each state are these, and the sa
 text is carried in the acceptance_json schema description:
 """+INPUT_CONTRACT_SPEC+"""Fixture contract rules. The validators are exact; a near miss is rejected as a plan
 error, not repaired silently. Executable examples of each rule follow this policy.
-- case_json is JSON TEXT: one string holding the case object, never a nested object.
+- case_json must be JSON TEXT: one string holding the case object. The object form is
+  accepted and encoded the same way, but text is the canonical form; a full plan and a
+  patch accept exactly the same encodings for both JSON-text fields.
 - The only assertion keys are stdout_equals, stdout_contains, expected_json_lines
   and relation. A layer=behavior test with oracle_status=supported must carry at
   least one of them inside case_json, or set case_json.entrypoint to an explicit
@@ -989,7 +1009,7 @@ def plan(source, config, audit, opts, deadline, feedback=None, previous=None, ca
                       {'base_kind': 'accepted_plan' if previous is not None else 'rejected_candidate',
                        'withdrawn': delta, 'proposal': sanitized(answer)})
         elif answer.get('action')=='plan':
-            proposed=answer['plan']
+            proposed=normalize_text_fields(answer['plan'])
             if base is not None:
                 # A full replacement is held to the same scope rule as a patch.
                 _require_scope(proposed, base, required)
@@ -1078,6 +1098,7 @@ def check_probe_syntax(case, default_entrypoint):
 
 def validate_plan(p, index, source, previous_cases=None, anchors=None):
     # jsonschema also validates fake/replayed responses, not only CLI structured outputs.
+    normalize_text_fields(p)
     import jsonschema
     try:
         compatible=copy.deepcopy(p)

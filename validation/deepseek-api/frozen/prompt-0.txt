@@ -89,7 +89,9 @@ a recorded gap. A repair may correct a draft classification only with this recor
 evidence; a locked acceptance contract stays as it is.
 Fixture contract rules. The validators are exact; a near miss is rejected as a plan
 error, not repaired silently. Executable examples of each rule follow this policy.
-- case_json is JSON TEXT: one string holding the case object, never a nested object.
+- case_json must be JSON TEXT: one string holding the case object. The object form is
+  accepted and encoded the same way, but text is the canonical form; a full plan and a
+  patch accept exactly the same encodings for both JSON-text fields.
 - The only assertion keys are stdout_equals, stdout_contains, expected_json_lines
   and relation. A layer=behavior test with oracle_status=supported must carry at
   least one of them inside case_json, or set case_json.entrypoint to an explicit
