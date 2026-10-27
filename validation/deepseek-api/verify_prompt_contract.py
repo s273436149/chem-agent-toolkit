@@ -66,6 +66,7 @@ PATCH_PROTOCOL = [
     ('nesting pointer form', '/acceptance_json/<pointer>'),
     ('repair evidence rule', 'by supplying that recorded evidence'),
     ('locked acceptance', 'no repair may touch a locked'),
+    ('removal carries no value', 'remove operation carries no value_json'),
 ]
 # Text that would contradict the current validators if it were still sent.
 FORBIDDEN = [

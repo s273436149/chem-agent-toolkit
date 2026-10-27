@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import unittest
 
+import jsonschema
+
 from creation_pipeline.runtime import planner
 
 
@@ -45,7 +47,7 @@ class PlannerSchemaTests(unittest.TestCase):
         self.assertNotIn('description', schema['properties']['plan']['properties']['base_image'])
 
     def test_exact_baseline_except_misdirected_annotations(self):
-        """The schema shape is frozen; the documentation text is not.
+        """The schema shape is frozen; the documentation and one operation rule are not.
 
         The baseline is the pre-fix snapshot: it still carries the acceptance text on
         every field that shared ``S``. Only the intended node keeps that
@@ -53,6 +55,10 @@ class PlannerSchemaTests(unittest.TestCase):
         exact shape comparison, and the intended node's *content* is asserted to be
         the current ``ACCEPTANCE_SPEC`` by the test above. Pinning the old text here
         would let the model be sent a contract the validators no longer accept.
+
+        ``value_json`` is the one deliberate structural change: a ``remove`` operation
+        has no value, and requiring one made a correct answer fail schema validation
+        (run 9). It is removed from the baseline copy here and asserted explicitly.
         """
         root = Path(__file__).resolve().parents[2] / 'validation/planner-schema-isolation/before'
         for name, current, intended in [
@@ -60,5 +66,18 @@ class PlannerSchemaTests(unittest.TestCase):
             ('patch', planner.PATCH_SCHEMA, '/description')]:
             baseline = json.loads((root / (name + '.json')).read_text(encoding='utf-8'))
             self.assertIn(intended, annotations(baseline))
+            if name == 'patch':
+                required = baseline['properties']['operations']['items']['required']
+                self.assertIn('value_json', required)
+                self.assertEqual(required, ['op', 'path', 'value_json'])
+                baseline['properties']['operations']['items']['required'] = ['op', 'path']
             # Documentation is compared by the test above, not pinned to a snapshot.
             self.assertEqual(strip_descriptions(current), strip_descriptions(baseline))
+
+    def test_a_removal_is_not_forced_to_carry_a_value(self):
+        operations = planner.PATCH_SCHEMA['properties']['operations']['items']
+        self.assertEqual(operations['required'], ['op', 'path'])
+        self.assertIn('value_json', operations['properties'])
+        answer = {'action': 'patch', 'requested_files': [], 'reason': 'drop a step',
+                  'operations': [{'op': 'remove', 'path': '/steps/0'}]}
+        jsonschema.validate(answer, planner.PATCH_SCHEMA)

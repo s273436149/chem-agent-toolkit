@@ -125,7 +125,7 @@ but never an upstream expectation, an accepted case, or scope the draft did not 
 Do not relabel failures as unsupported unless the actual resource is missing. No host
 paths or secrets.
 Patch operations are {op: add|replace|remove, path: "/json/pointer", value_json: JSON TEXT}.
-value_json is always a JSON document encoded as a string. For the two JSON-text plan
+value_json is required for add and replace; remove has no value. For the two JSON-text plan
 fields (acceptance_json and tests[].case_json) the validator accepts either the
 object/array itself or that object encoded once more as text, and stores JSON text
 either way; the object form is simpler and preferred, and replacing the whole /tests

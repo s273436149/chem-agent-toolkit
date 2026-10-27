@@ -123,6 +123,18 @@ class TextFieldEncodingTests(unittest.TestCase):
             patch(self.base, '/tests', json.dumps(tests), locked=True)
         self.assertIn('locked', str(caught.exception).lower())
 
+    def test_a_removal_needs_no_value_and_add_replace_do(self):
+        removed = {'action': 'patch', 'requested_files': [], 'reason': 'drop',
+                   'operations': [{'op': 'remove', 'path': '/tests/1'}]}
+        applied = planner.patch_plan(self.base, removed, False)
+        self.assertEqual([t['name'] for t in applied['tests']], ['environment'])
+        for operation in ({'op': 'replace', 'path': '/output_contract'},
+                          {'op': 'add', 'path': '/unresolved/-'}):
+            answer = {'action': 'patch', 'requested_files': [], 'reason': 'x', 'operations': [operation]}
+            with self.assertRaises(planner.PlanningError, msg=operation['op']) as caught:
+                planner.patch_plan(self.base, answer, False)
+            self.assertIn('value_json is required for op=' + operation['op'], str(caught.exception))
+
     def test_the_patched_plan_must_still_satisfy_the_plan_schema(self):
         applied = patch(self.base, '/tests/0/case_json', json.dumps(CASE))
         self.assertIn('tests', applied)

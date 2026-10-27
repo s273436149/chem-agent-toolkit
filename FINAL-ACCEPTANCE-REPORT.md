@@ -1,11 +1,141 @@
-# 最终验收报告（真实实验 · 第 8 次运行）
+# 最终验收报告（真实实验 · 第 9 次运行）
+
+日期：2026-10-27
+副本：`E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi`
+本次运行目录：`E:\Users\27343\Docker\acceptance-deepseek-run9-20261027`
+构建 ID：`20261027T183705-770487a9`（18:37:05 → 18:56:05，墙钟 19 分 0 秒）
+
+## 最终结论
+
+**仍然未通过，但已推进到真实规划阶段。** 本批首次在修复后的代码上完成
+来源准备 → 发现 → 编写 → 独立审阅 → 入口关联（作者声明的 `scripts/recap_terminal.py`），
+并以 **DeepSeek API** 执行了两轮真实环境规划：
+
+1. 第 1 轮：`deepseek-v4-pro`，469 s，17,403 prompt / 36,963 completion token。计划被语义门禁拒绝：
+   `invalid_input=required` 但 `operations` 未附带具名 checks → `Each input operation must apply named input checks`。
+2. 第 2 轮（修复补丁）：被**本地 schema 校验**拒绝：
+   `operations/1: 'value_json' is a required property` → `model_schema_mismatch`，批次阻塞。
+
+第 2 轮失败暴露的是**协议缺陷**（`remove` 操作被强制要求带 `value_json`），已离线修复；
+Docker 构建、业务验收、晋升、安装均 `not_run`。本批 **7/8** 次调用，剩余 1 次不足以完成任何阶段，
+按规则停止，**未重启、未续批、未显式恢复**。
+
+> 独立代码与迁移审查由**当前执行代理**完成，依据源码、调用路径与反例；**并非独立模型复核**。
+
+## 1. 基线与提交
+
+| 项 | 值 |
+| --- | --- |
+| 副本运行前 HEAD | `7f48cf4`（`feat(runtime): resolve and pin the base image digest instead of trusting a tag`） |
+| 运行前工作区 | 干净 |
+| 源目录（只读） | `78003de47c8bee93c705cd3a2098ee1f90646aae`，未修改 |
+| Codex CLI | 0.164.0-alpha.11.1，仅本进程 PATH |
+| DeepSeek | 官方端点，`deepseek-v4-pro`，`api_retries=0`，流式，无回退 |
+| 新增配置 | `pin_base_image=true`（本批启用），`model_calls=8`，单次 600 s，整批 3600 s |
+
+本轮运行**之后**的本地改动：`planner.PATCH_SCHEMA` 不再要求 `remove` 携带 `value_json`
+（`patch_plan` 对 add/replace 显式要求、对 remove 忽略）、补丁协议与 POLICY 措辞同步、
+`tests/pipeline/test_patch_encoding.py` 与 `test_planner_schema.py` 覆盖该规则、
+冻结提示/证明重新冻结、本报告与 `validation/deepseek-api/` 证据。
+
+## 2. 运行 9 各阶段
+
+| 阶段 | Provider / 模型 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| 来源准备 | — | **通过** | `sources.lock.json`（20,662 / 1,580 字节，哈希匹配） |
+| 发现 | Codex CLI / `gpt-6-astra` | **通过**（143 s） | `agent-turns/001-discovery` |
+| 编写 | Codex CLI / `gpt-6-astra` | **通过**（191 s） | `agent-turns/002-author`，包布局合规 |
+| 独立审阅 | Codex CLI / `gpt-6-astra` | **通过**（76 s） | `agent-turns/003-review` |
+| 入口关联 | DeepSeek / `deepseek-v4-pro` | **通过** | `binding.json`：`scripts/recap_terminal.py`，`declaration_source=author_declaration`，`association=reviewed` |
+| 环境规划 R1 | DeepSeek / `deepseek-v4-pro` | **语义拒绝** | `planning/0/rejection.json`：`invalid_input=required` 但无具名 checks |
+| 环境规划 R2 | DeepSeek / `deepseek-v4-pro` | **模型输出无效** | `planning/1/model-0/request.json`：`operations/1` 缺 `value_json` |
+| Docker 构建 | — | `not_run` | 规划未通过 |
+| 业务验收 | — | `not_run` | — |
+| catalog 晋升 | — | `not_run` | `candidate_saved`（candidates 区） |
+| 安装 / 安装后使用 | — | `not_run` | 无合格正式产物 |
+
+## 3. 调用账本与预算
+
+| 项 | 实际 |
+| --- | --- |
+| 应用层调用 | **7 / 8**（3 Codex + 4 DeepSeek：关联、关联审阅、规划 R1、规划 R2） |
+| 模型 | Codex `gpt-6-astra`；DeepSeek `deepseek-v4-pro`（官方端点） |
+| 单次上限 | 600 s 未触及；最长一次 469 s（规划 R1） |
+| 批次时长 | 19 分 0 秒（3600 s 预算未触及） |
+| 重试 / 回退 | `api_retries=0`；无 provider 切换；无探针 |
+| 240 s 观测 | `observe`，`max_silence_seconds` 3.96–6.06 s，未触发终止 |
+| 停止原因 | 规划 R2 本地 schema 校验失败（模型输出无效），非预算/超时 |
+| 发送指纹（本批真实记录） | R1：prompt `ea12a80b…`（50,178 B）+ schema `141f8b01…`；R2：prompt `1b5365e5…`（62,182 B）+ schema `0ac6d7fa…` |
+
+## 4. 审查发现、修复与未解决
+
+| # | 严重度 | 位置 | 触发条件 | 影响 | 处置 |
+| --- | --- | --- | --- | --- | --- |
+| F1 | **阻断** | `runtime/planner.py::PATCH_SCHEMA` | 任何 `remove` 操作（无值可编码） | 合法的修复补丁被判 `model_schema_mismatch`，整批阻塞（本批 7/8 调用后） | **已修**：`value_json` 仅对 add/replace 必需；协议与 POLICY 措辞同步；缺失值给明确错误；回归覆盖 |
+| F2 | 中 | `acceptance.contracts` + POLICY | 计划声明 `invalid_input=required` 却不给具名 checks | 语义拒绝并消耗一轮调用（R1） | 门禁不变（该拒绝正确）；提示已含"required 需具名 checks；fixed-example 用 not_applicable"，下批观察 |
+| F3 | 信息 | 预算结构 | 3 Codex + 关联/审阅 + 规划 2 轮 = 7/8 | 无余量做第二次 Docker/修复 | 建议下批 10 次，或把契约要点前置到发现阶段 |
+| F4 | 信息 | `pin_base_image` | 本批规划未通过，未进入 preparation | 新增的镜像摘要解析在本批**未被执行** | 如实记录，机制测试已覆盖 |
+
+未证明事项（待核查）：`none_documented` 三态在真实规划中的选用（本批模型选了 `required`）；
+镜像摘要解析与 Docker 构建（未达该阶段）；Markdown 入口路径（本批为脚本入口）。
+
+## 5. 能力迁移映射与证据（源码与调用路径）
+
+| 能力 | 机制 | 证据 |
+| --- | --- | --- |
+| 发现 / 编写 / 独立审阅 | Codex CLI `NativeSession` | 本批 3 次真实调用全部 completed |
+| 结构化调用（关联、契约、规划） | `model_call` → `deepseek_api`，本地 Schema + 语义门禁 | 本批 4 次真实调用；R1 语义拒绝、R2 本地 schema 拒绝，均非崩溃 |
+| 入口解析优先级 | 调用方绑定 → 作者声明 → 保守识别 | 本批走作者声明（`author_declaration`），未预填 binding |
+| 单一 catalog / 资格 | `store.py` 单事务 + `library.py` 门面，查询/安装/晋升均过 `qualify()` | `test_skill_library`、`test_delivery_protocol` |
+| 交付分离 | `deliveries/` ↔ `evidence/`（冻结指纹）↔ `runs/`（动态） | `evidence.py:verify`，本批真实写入 |
+| 提示协议与发送指纹 | `INPUT_CONTRACT_SPEC` 单一源 + `build_prompt/schema_for/provenance` | 本批两轮真实记录 prompt/schema sha256 |
+| 删除 | 无 | 生产树对 `validation/`、`frozen/` 0 引用 |
+
+## 6. 未验证范围与最小剩余工作
+
+未验证：Docker 构建、全部业务验收、catalog 晋升、默认查询/安装、容器内使用、镜像摘要解析、
+三态 `none_documented` 的真实选用、故障注入类资格撤销。
+
+最小剩余工作（需另行授权）：
+1. 用包含 `value_json` 修复的代码新开一批；**建议 10 次调用**（3 Codex + 关联/审阅 2 + 规划 2–3 + 余量），
+   仍受 600 s/单次、3600 s/整批、`api_retries=0`、首次 Docker 失败即停约束。
+2. 若必须 8 次：把"required 必须有具名 checks"与"remove 无 value_json"前置到发现/关联上下文，降低规划轮次。
+3. Docker 阶段尚未真实验证 `pin_base_image` 的解析与冻结，下批需观察 `base-image.json` 与
+   `FROM repo@sha256:...` 实际渲染。
+
+## 7. 证据与可复现
+
+```text
+validation/deepseek-api/evidence/real-batch-run9-20261027/
+  batch-summary.json  summary.json  record.json  sources.lock.json  run9.log  binding.json
+  agent-turns/00{1-discovery,2-author,3-review}/{command.json,prompt.txt,result.json}
+  planning/{0,1}/prompt-0.txt prompt-provenance-0.json response-0.json rejection.json
+  planning/{0,1}/model-0/{request.json,response.json,schema.json}
+  delivered/{SKILL.md,scripts/recap_terminal.py,...}
+```
+
+凭据扫描：本目录 0 次凭据形状命中。
+
+```powershell
+$env:PATH = 'C:\Users\27343\AppData\Local\OpenAI\Codex\bin\2993767bd1dfb009;' + $env:PATH
+cd E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi
+python -m creation_pipeline build validation/deepseek-api/acceptance-normal-input.json `
+  --state-dir <new>\state --library-dir <new>\library
+python -m unittest discover -s tests -q      # 503 OK (3 skipped)
+```
+
+**最终 SKILL.md**：未形成合格交付（候选位于 `library/candidates/rdkit-recap-terminal-fragments`）。
+
+## 附录 A：运行 8 记录（历史，结论保留）
+
+### A.1 运行 8 结论
 
 日期：2026-10-27
 副本：`E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi`
 本次运行目录：`E:\Users\27343\Docker\acceptance-deepseek-run8-20261027`
 构建 ID：`20261027T171821-354e8d22`（17:18:21 → 17:24:58，墙钟 6 分 37 秒）
 
-## 最终结论
+### A.2 运行 8 结论正文
 
 **未通过（阻塞：作者交付违反包布局，在 3/8 次调用后失败）。** 来源准备与发现阶段真实通过；
 编写阶段交付了根级 `LICENSES.txt`，被既有包布局校验拒绝；唯一一次作者修复轮此前**只被告知**
@@ -18,7 +148,7 @@ check 定义错误（`json_equals must be an object`），于是修好该错误�
 
 > 独立代码与迁移审查由**当前执行代理**完成，依据源码、调用路径与反例；**并非独立模型复核**。
 
-## 1. 基线与提交
+### A.3 运行 8 基线
 
 | 项 | 值 |
 | --- | --- |
@@ -36,7 +166,7 @@ check 定义错误（`json_equals must be an object`），于是修好该错误�
 `artifacts/delivery.py`（聚合反馈）、`docs/skills/packaging.md` 与 `minimum.md`（闭合布局规则）、
 `tests/pipeline/test_author_feedback.py`（回归）、本报告与 `validation/deepseek-api/` 证据。
 
-## 2. 运行 8 各阶段
+### A.4 运行 8 各阶段
 
 | 阶段 | Provider / 模型 | 状态 | 证据 |
 | --- | --- | --- | --- |
@@ -55,7 +185,7 @@ check 定义错误（`json_equals must be an object`），于是修好该错误�
 `checks=[author_or_validation: fail]`。交付文件（原样保留在证据中）：
 `SKILL.md`（4,520 B）、`LICENSES.txt`（3,200 B）、`scripts/terminal_fragments.py`（1,596 B）。
 
-## 3. 调用账本与预算
+### A.5 运行 8 调用账本
 
 | 项 | 实际 |
 | --- | --- |
@@ -67,7 +197,7 @@ check 定义错误（`json_equals must be an object`），于是修好该错误�
 | 240 s 观测窗口 | `progress_watch=observe`，无终止 |
 | 停止原因 | 作者修复轮后包布局校验失败（非预算、非超时、非模型不可用） |
 
-## 4. 审查发现、修复与未解决
+### A.6 运行 8 审查发现
 
 | # | 严重度 | 位置 | 触发条件 | 影响 | 处置 |
 | --- | --- | --- | --- | --- | --- |
@@ -80,7 +210,7 @@ check 定义错误（`json_equals must be an object`），于是修好该错误�
 跨平台 manifest 已在 `artifacts/evidence.py` 以"排序无关、逐项 path/sha256/bytes"比较并有测试，但本批
 未在真实冻结树上重复验证。
 
-## 5. 能力迁移映射与证据（基于源码与调用路径）
+### A.7 运行 8 能力映射
 
 | 能力 | 机制 | 证据 |
 | --- | --- | --- |
@@ -93,7 +223,7 @@ check 定义错误（`json_equals must be an object`），于是修好该错误�
 | 新增（本轮前） | 三态 `input_contract`、嵌套补丁、`scope-delta`、prompt provenance/契约审计 | `test_input_contract`(26)、`test_patch_encoding`(23)、`test_prompt_contract`(7)、`test_prompt_provenance`(5) |
 | 删除 | 无（未删除仍被调用的成熟逻辑） | 生产树对 `validation/`、`frozen/` 的历史依赖审计为 **0** |
 
-## 6. 未验证范围与最小剩余工作
+### A.8 运行 8 未验证范围
 
 未验证：独立审阅、入口关联、环境规划、DeepSeek 三态提示的真实执行、Docker 构建、业务验收、
 catalog 晋升、安装与容器内使用、镜像丢失/漂移的破坏性验证。
@@ -104,7 +234,7 @@ catalog 晋升、安装与容器内使用、镜像丢失/漂移的破坏性验�
 2. 若仍要在 8 次内完成，需要在作者阶段减少往返（例如把布局规则前置到发现阶段上下文）。
 3. F3（基础镜像同版重建）如需保证，必须实现 `pin_base_image` 或显式接受"镜像身份随构建记录"。
 
-## 7. 证据与可复现
+### A.9 运行 8 证据
 
 ```text
 validation/deepseek-api/evidence/real-batch-run8-20261027/
@@ -126,9 +256,9 @@ python -m unittest discover -s tests -q      # 493 OK (3 skipped)
 
 **最终 SKILL.md**：未形成合格交付（候选位于 `library/candidates/rdkit-recap-terminal-fragments`）。
 
-## 附录 A：运行 1–7 记录（历史，结论保留）
+## 附录 B：运行 1–7 记录（历史，结论保留）
 
-### A.1 运行 7 结论
+### B.1 运行 7 结论
 
 **未通过（阻塞：规划契约未通过 + 模型重复同一非法补丁）。** 前五个阶段真实通过；环境规划在两次尝试、4 次 DeepSeek 调用后仍未产出合格计划，第 3 次尝试提交了**与上一次完全相同**的非法补丁，被既有"无进展"规则拦下（`plan_unresolved`）。Docker 构建、业务验收、晋升、安装全部 `not_run`。
 
@@ -138,7 +268,7 @@ python -m unittest discover -s tests -q      # 493 OK (3 skipped)
 
 ---
 
-### A.2 运行 7 基线与提交
+### B.2 运行 7 基线与提交
 
 | 项 | 值 |
 | --- | --- |
@@ -150,7 +280,7 @@ python -m unittest discover -s tests -q      # 493 OK (3 skipped)
 | DeepSeek | 官方端点，`deepseek-v4-pro`，`api_retries=0` |
 | 取源预检 | 通过（20,662 / 1,580 字节，哈希匹配） |
 
-### A.3 运行 1–7 一览
+### B.3 运行 1–7 一览
 
 | 运行 | 结果 | 根因 / 处置 |
 | --- | --- | --- |
@@ -162,7 +292,7 @@ python -m unittest discover -s tests -q      # 493 OK (3 skipped)
 | 6 | **崩溃 `failed`** | 补丁把结构化值写进 `acceptance_json` → `json.loads(dict)` `TypeError` → 已修 |
 | 7 | 阻塞 `plan_unresolved` | 见 §3 |
 
-### A.4 运行 7 各阶段
+### B.4 运行 7 各阶段
 
 | 阶段 | Provider | 状态 |
 | --- | --- | --- |
@@ -175,7 +305,7 @@ python -m unittest discover -s tests -q      # 493 OK (3 skipped)
 | 环境规划 | DeepSeek v4-pro | **失败**，见 §3.1 |
 | 构建 / 验收 / 晋升 / 安装 | — | not_run |
 
-#### A.4.1 规划两轮与停止点
+#### B.4.1 规划两轮与停止点
 
 | 尝试 | DeepSeek 调用 | 结局 |
 | --- | --- | --- |
@@ -185,7 +315,7 @@ python -m unittest discover -s tests -q      # 493 OK (3 skipped)
 停止码：`plan_unresolved`，detail 为 `No progress: repeated invalid plan patch: ...`。
 **不是预算耗尽**（10 / 12），也**不是超时或传输失败**。
 
-#### A.4.2 本次修复在真实运行中的验证
+#### B.4.2 本次修复在真实运行中的验证
 
 运行 6 的崩溃点现在表现为：
 
@@ -195,7 +325,7 @@ patch-rejection-0.json: Patched plan schema error: {'args': [...], ...} is not o
 
 即：非法补丁 → 干净的 `PlanningError` → 进入修复轮（并最终由无进展规则收尾），不再让整批 `failed`。
 
-### A.5 运行 7 调用账本与预算
+### B.5 运行 7 调用账本与预算
 
 | 项 | 值 |
 | --- | --- |
@@ -207,7 +337,7 @@ patch-rejection-0.json: Patched plan schema error: {'args': [...], ...} is not o
 | 批次墙钟 | 2,088 s ≪ 3,600 s |
 | 终止原因 | 无进展（重复非法补丁），非预算、非超时 |
 
-### A.6 审查发现（累计）
+### B.6 审查发现（累计）
 
 | # | 严重度 | 位置 | 状态 |
 | --- | --- | --- | --- |
@@ -222,11 +352,11 @@ patch-rejection-0.json: Patched plan schema error: {'args': [...], ...} is not o
 
 **待核查**：跨平台换行下的 manifest 严格性；"较新审阅拒绝对旧计划恢复"缺真实反例。
 
-### A.7 运行 7 未验证范围
+### B.7 运行 7 未验证范围
 
 规划通过、计划语义门禁通过、Docker 构建、全部业务验收、catalog 晋升、默认/候选查询、隔离安装、容器内实际使用。
 
-### A.8 运行 7 最小剩余工作（需授权）
+### B.8 运行 7 最小剩余工作（需授权）
 
 0. **预算**：`validation/deepseek-api/acceptance-normal-input.json` 当前是 **12 次**
    （运营者本轮临时上调；此前曾改回 8）。运行 7 在 **10/12** 因"重复非法补丁/无进展"
@@ -275,7 +405,7 @@ patch-rejection-0.json: Patched plan schema error: {'args': [...], ...} is not o
 2. 之后重跑唯一一批（12 次预算、3600 s、新隔离目录）。
 3. 若仍不收敛，则需要重新评估：要么接受"该模型在 8–12 次预算内无法满足这套验收契约"，要么改变策略（更强模型/更多预算/把这套契约拆成可迭代的更小步骤）。
 
-### A.9 运行 7 证据
+### B.9 运行 7 证据
 
 ```
 validation/deepseek-api/evidence/
@@ -294,6 +424,6 @@ python -m unittest discover -s tests -q      # 490 OK (3 skipped)
 
 **最终 SKILL.md**：未形成合格交付（候选在 `library/candidates/`）。
 
-### A.10 运行 7 边界声明
+### B.10 运行 7 边界声明
 
 未通过只说明：在 12 次预算内该模型未产出满足既有验收契约的计划，且修复轮出现重复无进展。它不说明门禁有误，也不说明历史 600 s 超时根因已解决、性能达标或版本可合并。未执行 merge / push / 发布，未修改源目录，未删除共享镜像；未自动重启、续批或恢复。

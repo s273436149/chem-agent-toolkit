@@ -224,6 +224,9 @@ PLAN_SCHEMA = obj({
 
 PATCH_SCHEMA = obj({'action':{'type':'string','enum':['read','patch']},'requested_files':arr(),'reason':S,
                     'operations':arr(obj({'op':{'type':'string','enum':['add','replace','remove']},'path':S,'value_json':S}))})
+# A removal has no value to encode: requiring one made a correct answer fail schema
+# validation (run 9). add/replace still need it, and patch_plan says so explicitly.
+PATCH_SCHEMA['properties']['operations']['items']['required'] = ['op', 'path']
 
 # The model must state whether resource requirements are actually known.
 _plan = PLAN_SCHEMA['properties']['plan']
@@ -259,6 +262,8 @@ def patch_plan(base, answer, locked, required=None):
             raise PlanningError('Repair cannot patch locked tests')
         try:
             op=edit['op']
+            if op != 'remove' and 'value_json' not in edit:
+                raise PlanningError('value_json is required for op=' + op + ' at ' + raw)
             value=None if op == 'remove' else json.loads(edit['value_json'])
             nested = _nested_text_target(parts)
             if nested is not None:
@@ -662,7 +667,7 @@ but never an upstream expectation, an accepted case, or scope the draft did not 
 Do not relabel failures as unsupported unless the actual resource is missing. No host
 paths or secrets.
 Patch operations are {op: add|replace|remove, path: "/json/pointer", value_json: JSON TEXT}.
-value_json is always a JSON document encoded as a string. For the two JSON-text plan
+value_json is required for add and replace; remove has no value. For the two JSON-text plan
 fields (acceptance_json and tests[].case_json) the validator accepts either the
 object/array itself or that object encoded once more as text, and stores JSON text
 either way; the object form is simpler and preferred, and replacing the whole /tests
@@ -796,7 +801,8 @@ def patch_protocol(locked):
     rules the validator enforces cannot drift away from what the model is told.
     """
     text = ('\nPATCH PROTOCOL: Return action=read with operations=[] or action=patch with JSON Pointer '
-            'operations (add/replace/remove; value_json is JSON text). Return only needed edits to '
+            'operations (add/replace/remove). value_json is JSON text and is required for add and '
+            'replace; a remove operation carries no value_json. Return only needed edits to '
             'previous_plan, not a full replacement. '
             'A pointer may continue inside a JSON-text field: /acceptance_json/<pointer> edits the decoded '
             'policy and /tests/<index>/case_json/<pointer> edits one decoded fixture, so a single check or '

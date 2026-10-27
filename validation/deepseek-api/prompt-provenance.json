@@ -3,14 +3,14 @@
     "acceptance_spec_bytes": 5731,
     "acceptance_spec_sha256": "453d0c0c9af563ac02e7b32b957c4fb438c20e855ae9f9f13bf73bf0179e9af9",
     "input_contract_spec_sha256": "2403220c13052060553007d909a03ff1869c10b7a41248bbf9b922a52f4dce34",
-    "patch_schema_sha256": "0ac6d7fa716f9b93debb0389cd672ed0876cde5e29221a10e3836357afe06d74",
+    "patch_schema_sha256": "650a9a3c6d61c7d963c281d8cdf6c8fc4ec3b8fc6d003723bd96ec55246d2e9b",
     "plan_schema_sha256": "141f8b010ef82bc921e1e2989444632f25d5ab304148e042059d67eb3e0cbbfc",
-    "policy_bytes": 12055,
-    "policy_sha256": "cd67ff2bf5a6ec0d4409cbd9fee8392cebf5f82d2002072e9113f220a2661843"
+    "policy_bytes": 12062,
+    "policy_sha256": "dad26cf5fabc2271f9efcc71fbacd3fcde3338d2fa4c6ce4ff64cc050d303e2e"
   },
   "frozen_fixture": {
-    "prompt_bytes": 14814,
-    "prompt_sha256": "50460c7dc121a55114249cb0346345aa817bb43f6c528d490050d57708a6ddb2",
+    "prompt_bytes": 14821,
+    "prompt_sha256": "ff88a89e8c90f3038ea9f3e486fb45be6fc8549385a1074d2685307b0317e1ad",
     "schema_sha256": "141f8b010ef82bc921e1e2989444632f25d5ab304148e042059d67eb3e0cbbfc",
     "status": "frozen",
     "used_by": "validation/deepseek-api/verify_planner.py only"
@@ -24,12 +24,12 @@
       "base_kind": "accepted_plan",
       "generated_by": "creation_pipeline.runtime.planner current code (no frozen copy)",
       "input_contract_spec_sha256": "2403220c13052060553007d909a03ff1869c10b7a41248bbf9b922a52f4dce34",
-      "policy_bytes": 12927,
-      "policy_sha256": "4b94996ffffbc30e2a1fea32f97827fb2b566e182dc6584184e9f1622808c5df",
-      "prompt_bytes": 13396,
-      "prompt_sha256": "e41e2e2d2003db525a06417450c1085d7241ce88659d73e293d355d5752ac06d",
-      "schema_bytes": 6407,
-      "schema_sha256": "0ac6d7fa716f9b93debb0389cd672ed0876cde5e29221a10e3836357afe06d74"
+      "policy_bytes": 13012,
+      "policy_sha256": "c7c405feac9dd825d58cd4c62ce764c0c7bb3e6d2ab570fe509d667ae52d0673",
+      "prompt_bytes": 13481,
+      "prompt_sha256": "217d5ea2c0589cd39ec7d85769318f8054d8b79ae54f6abfcd22ab3bbc8fc45f",
+      "schema_bytes": 6393,
+      "schema_sha256": "650a9a3c6d61c7d963c281d8cdf6c8fc4ec3b8fc6d003723bd96ec55246d2e9b"
     },
     "none": {
       "acceptance_spec_bytes": 5731,
@@ -37,10 +37,10 @@
       "base_kind": "none",
       "generated_by": "creation_pipeline.runtime.planner current code (no frozen copy)",
       "input_contract_spec_sha256": "2403220c13052060553007d909a03ff1869c10b7a41248bbf9b922a52f4dce34",
-      "policy_bytes": 12055,
-      "policy_sha256": "cd67ff2bf5a6ec0d4409cbd9fee8392cebf5f82d2002072e9113f220a2661843",
-      "prompt_bytes": 12524,
-      "prompt_sha256": "015a8d11104c1414deec11738dfae9ed9d55eb762b5a0e6bad4483030ad242c1",
+      "policy_bytes": 12062,
+      "policy_sha256": "dad26cf5fabc2271f9efcc71fbacd3fcde3338d2fa4c6ce4ff64cc050d303e2e",
+      "prompt_bytes": 12531,
+      "prompt_sha256": "5ecda6ada24176eb2545188087e0867cbe936844973acc0ce686361db43aa433",
       "schema_bytes": 10437,
       "schema_sha256": "141f8b010ef82bc921e1e2989444632f25d5ab304148e042059d67eb3e0cbbfc"
     },
@@ -50,12 +50,12 @@
       "base_kind": "rejected_candidate",
       "generated_by": "creation_pipeline.runtime.planner current code (no frozen copy)",
       "input_contract_spec_sha256": "2403220c13052060553007d909a03ff1869c10b7a41248bbf9b922a52f4dce34",
-      "policy_bytes": 13170,
-      "policy_sha256": "c1b9ef48a97e2e1578d00cf0e893de95bfff7ec9e20400a3af0b143b13dc4820",
-      "prompt_bytes": 13639,
-      "prompt_sha256": "19082ea54147c023b7db8f5ceefab78a93eff90bd59f6f4e2d4817b544875457",
-      "schema_bytes": 6407,
-      "schema_sha256": "0ac6d7fa716f9b93debb0389cd672ed0876cde5e29221a10e3836357afe06d74"
+      "policy_bytes": 13255,
+      "policy_sha256": "12d0161ff0ecc3964c62033ffc28e70705476276ef87810f8bdb88402d258102",
+      "prompt_bytes": 13724,
+      "prompt_sha256": "f9911747a781955fa87d165c0a6899ef058829a7a2e26c2b804333576e2a0ed6",
+      "schema_bytes": 6393,
+      "schema_sha256": "650a9a3c6d61c7d963c281d8cdf6c8fc4ec3b8fc6d003723bd96ec55246d2e9b"
     }
   },
   "saved_case": {
@@ -65,10 +65,10 @@
       "base_kind": "none",
       "generated_by": "creation_pipeline.runtime.planner current code (no frozen copy)",
       "input_contract_spec_sha256": "2403220c13052060553007d909a03ff1869c10b7a41248bbf9b922a52f4dce34",
-      "policy_bytes": 12055,
-      "policy_sha256": "cd67ff2bf5a6ec0d4409cbd9fee8392cebf5f82d2002072e9113f220a2661843",
-      "prompt_bytes": 47779,
-      "prompt_sha256": "3a62128ee8f559f43d1eedc8b353d00859fbbcf5873c2dd44cad365fb47c9f8a",
+      "policy_bytes": 12062,
+      "policy_sha256": "dad26cf5fabc2271f9efcc71fbacd3fcde3338d2fa4c6ce4ff64cc050d303e2e",
+      "prompt_bytes": 47786,
+      "prompt_sha256": "135c5066631c535c8ffef94f20eda602fcd7897ad7fff039154f8fde88e9da24",
       "schema_bytes": 10437,
       "schema_sha256": "141f8b010ef82bc921e1e2989444632f25d5ab304148e042059d67eb3e0cbbfc"
     },
