@@ -80,7 +80,7 @@ class PromptProvenanceTests(unittest.TestCase):
         settings = deepseek_api.Settings(
             api_key='not-a-real-key', scheme='https', host='api.deepseek.com', port=None,
             prefix='/v1', endpoint_kind='official', model='deepseek-flash',
-            max_output_tokens=1024, stream=True, retries=0, timeout=600,
+            max_output_tokens=1024, stream=True, retries=0, connect_retries=0, timeout=600,
             reasoning_effort=None, thinking=None, effort_sent=None, effort_note=None,
             service_tier=None, progress_timeout=None)
         material = self.verify.fixture_material()
