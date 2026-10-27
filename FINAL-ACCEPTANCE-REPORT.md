@@ -30,6 +30,7 @@
 | 运行 1 | 发现阶段失败 | Codex CLI 缺 `codex-code-mode-host.exe`（环境缺陷） |
 | 运行 2 | 规划阶段 52.5 s 中断 | **本地读取缺陷**：5 秒切片超时后重试同一 reader → `OSError: cannot read from timed out object`；且 `Connection: close` 时 `connection.sock` 为 `None` 使切片静默失效 |
 | 运行 3 | 规划 3 轮全部语义拒绝 → 预算耗尽 | 读取缺陷修复后，规划真实返回计划 |
+| 运行 4 | **发现阶段失败** | 源码下载被截断（11,024 B vs 固定 20,662 B），固定 SHA-256 命中失败 → 门禁正确拒绝，仅剩 license，agent 如实报 blocked。`deepseek-v4-pro` 与新 policy **未被触达** |
 
 运行 2 的中断曾被推断为"代理/网络切断长连接"，**该归因已撤回**；真实原因见 §5 F7。
 
@@ -48,6 +49,26 @@
 
 候选停在该库 `candidates/` 区，未晋升、未安装。
 
+### 3.1 运行 4（`deepseek-v4-pro` + 强化 policy 之后）
+
+按授权改了代码（`1e4112e`：`api_model=deepseek-v4-pro`；`planner.POLICY` 增加三条夹具约定的正反例；小型冻结夹具重新冻结），全量回归 **412 OK**，随后重跑。结果在**发现之前**就失败：
+
+* 来源获取把 `Recap.py` 存成 **11,024 字节**（sha256 `ff168a13…`），而配置固定 **20,662 字节**（`d4f9b969…`）；
+* 获取端记录 `Source hash differs from configuration`，**正确地拒绝**了这份字节，只保留 license；
+* 发现 agent 因此如实报 blocked（"RECAP behavior could not be grounded in source"）；
+* 账本只用 **1 / 8** 次调用，0 次 DeepSeek 请求、0 次构建。
+
+事后复检网络（只读、不耗调用）：对同一 URL 连续 4 次抓取**全部被截断**：
+
+```
+IncompleteRead(6890 bytes read, 13772 more expected)
+IncompleteRead(11024 bytes read, 9638 more expected)
+IncompleteRead(9646 bytes read, 11016 more expected)
+IncompleteRead(11024 bytes read, 9638 more expected)
+```
+
+即**当前网络路径在稳定截断该响应**（Content-Length 声明 20,662 字节）。所以这不是重跑能绕过的偶发问题，也不是代码缺陷；**`deepseek-v4-pro` 与新 policy 尚未被真实触达**。
+
 ## 4. 规划三轮的实际拒绝链（本轮核心证据）
 
 | 轮次 | DeepSeek 调用 | 响应 | 门禁诊断 |
@@ -64,7 +85,6 @@
 * 传输层完全正常：3 次调用全部 `completed`，无重试（`api_retries=0`），无重连。
 
 ## 5. 审查发现
-
 | # | 严重度 | 位置 | 触发 | 影响 / 状态 |
 | --- | --- | --- | --- | --- |
 | F1 | ~~high~~ 已解决 | Codex CLI 缺 code-mode host | 带工具回合 | 换完整安装后 3 次运行的 Codex 回合全部成功 |
