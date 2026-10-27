@@ -1,11 +1,82 @@
-# 最终验收报告（真实实验 · 第 13 次运行）
+# 最终验收报告（真实实验 · 第 14–17 次运行，全部阶段改用 DeepSeek）
+
+日期：2026-10-27
+副本：`E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi`
+起因：Codex 账户限额（`run 13`），改为**把发现/编写/独立审阅也接到 DeepSeek API**，
+保留 Codex 为默认后端，可一行配置切回。
+
+## 最终结论
+
+**三轮（15–17）全部执行，仍无 Docker 构建**；但这是本项目第一次让**整条模型链**在 DeepSeek 上跑通到
+运行时准备之后：发现 ✅ → 编写 ✅ → 独立审阅 ✅ → 执行需求确认 ✅ → **入口绑定/规划前**止步。
+每轮都暴露一个**提示契约缺口**，均已修复并回归：
+
+| 轮次 | 调用 | 停止点 | 缺陷（提示契约） | 修复提交 |
+| --- | --- | --- | --- | --- |
+| 14 | 0 | 保存运行守卫 | `model.backend` 白名单仅 codex_cli | `4b1c535` 后续 guard 修复 |
+| 15 | 4 | 编写 | 模型只给 exit-code 检查，无结果断言 | author 提示明确要求可观测断言 |
+| 16 | 5 | 运行时准备 | `runtime_requirement` 返回字符串而非记录对象 | API schema 与提示给出对象契约 |
+| 17 | 5 | 入口绑定 | SKILL.md 有 4 个 python 代码块且无可执行入口声明 | author 提示给出"唯一可执行入口"规则 |
+
+调用合计 **14 次**（14 轮 0 + 15 轮 4 + 16 轮 5 + 17 轮 5），无重试、无回退、无探针；
+失败轮次未重启/未续批。Docker 构建、业务验收、catalog 晋升、安装全部 `not_run`。
+
+> 审查由**当前执行代理**完成，并非独立模型复核。
+
+## 1. 关键改造：原生阶段可切到 DeepSeek（Codex 仍是默认）
+
+- `model.backend` 现支持 `codex_cli`（默认，原样保留）与 `deepseek_api`（单次结构化调用）。
+- 切换后每个原生阶段＝**一次有界 chat completion**：同样的 instructions、context、答案 schema、
+  receipt/审计目录与调用预算；作者阶段额外返回 `files:[{path,content}]`，由宿主机写入后仍走
+  **原封不动的 `delivery.finish` / `validate_package`**。
+- 切回只需把 `model.backend` 改回 `codex_cli`；未知后端仍在发请求前被拒。
+- 为什么不在 CLI 侧切：本机 CLI 已只支持 `wire_api="responses"`，而 DeepSeek 提供 chat completions，
+  因此开关放在管线内而非 provider 配置里。
+- 回归：`tests/pipeline/test_api_native_provider.py`（9 项）覆盖开关、提示增补、源文本内联、
+  作者文件落盘（含路径穿越/二进制拒绝）、成功与失败的 API 阶段、codex 路径仍走 CLI。
+
+## 2. 三轮的账本
+
+| 项 | run 15 | run 16 | run 17 |
+| --- | --- | --- | --- |
+| 发现 / 编写 / 审阅 | ✅ / ✅ / — | ✅ / ✅ / ✅ | ✅ / ✅ / ✅ |
+| 执行需求确认 | — | `requirements_unknown` | ✅ `required`（引用 `document.py` 原文） |
+| 入口绑定 | — | — | ❌ `entry_unsupported`（4 个 python 块、无声明） |
+| 规划 / Docker / 验收 | `not_run` | `not_run` | `not_run` |
+| 应用层调用 | 4 | 5 | 5 |
+
+## 3. 证据与可复现
+
+```text
+validation/deepseek-api/evidence/
+  real-batch-run14-20261027/  real-batch-run15-20261027/
+  real-batch-run16-20261027/  real-batch-run17-20261027/
+```
+
+四轮证据凭据形状命中 **0**。
+
+```powershell
+cd E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi
+python -m creation_pipeline build validation/deepseek-api/acceptance-normal-input.json `
+  --state-dir <new>\state --library-dir <new>\library
+python -m unittest discover -s tests -q      # 524 OK (3 skipped)
+```
+
+`validation/deepseek-api/acceptance-normal-input.json` 现为：`model.backend=deepseek_api`、
+`model.api_model=deepseek-v4-pro`、`model_calls=12`、`pin_base_image=true`。
+
+**最终 SKILL.md**：未形成合格交付（候选在 candidates 区）。
+
+## 运行 13 记录（历史，结论保留）
+
+### 运行 13 结论
 
 日期：2026-10-27
 副本：`E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi`
 本次授权：最多 3 轮全新实验、每轮 12 次应用层调用；本轮为第 1 轮。
 运行目录：`E:\Users\27343\Docker\acceptance-deepseek-run13-20261027`（构建 `20261027T200753-a864f013`）
 
-## 最终结论
+### 运行 13 结论正文
 
 **本轮被外部资源上限阻断，不是代码缺陷，也不是验收失败。** 10–12 轮暴露的三处缺陷都已修复并回归，
 本轮在修复后的代码上重新开始；来源准备、发现、编写三步真实完成，第 3 步**独立审阅**调用被
@@ -27,7 +98,7 @@ credits or try again at Nov 2nd, 2026 1:59 PM.
 
 > 审查由**当前执行代理**完成，并非独立模型复核。
 
-## 1. 本轮账本
+### 运行 13 账本
 
 | 阶段 | Provider / 模型 | 状态 |
 | --- | --- | --- |
@@ -39,7 +110,7 @@ credits or try again at Nov 2nd, 2026 1:59 PM.
 
 应用层调用 **3 / 12**；单次 600 s、整轮 3600 s 均未触及；无重试、无回退、无探针；未重启、未续批。
 
-## 2. 进入本轮前的修复（第 10–12 轮遗留）
+### 运行 13 前的修复
 
 | # | 缺陷 | 修复提交 |
 | --- | --- | --- |
@@ -50,7 +121,7 @@ credits or try again at Nov 2nd, 2026 1:59 PM.
 离线回归：**515 OK (3 skipped)**；`verify_prompt_contract`、`verify_acceptance_prompt check`、
 `verify_planner check` 均通过；冻结提示 15,204 B。
 
-## 3. 阻断的处置选项（需要你决定）
+### 运行 13 处置选项
 
 1. **等待/充值 Codex 额度**（提示的恢复时间：2026-11-02 13:59），之后按同样约束重跑；
    这是唯一不改变架构、可继续验证 `pin_base_image` 与 Docker 阶段的路径。
@@ -59,7 +130,7 @@ credits or try again at Nov 2nd, 2026 1:59 PM.
 3. **授权把发现/编写/审阅也迁到 DeepSeek**：这是完整模型阶段迁移，需重新评估工具调用循环、
    审阅独立性等，属于架构变更，不能由我自行决定。
 
-## 4. 证据与可复现
+### 运行 13 证据
 
 ```text
 validation/deepseek-api/evidence/real-batch-run13-20261027/
