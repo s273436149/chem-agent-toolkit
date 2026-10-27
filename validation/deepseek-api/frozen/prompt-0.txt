@@ -17,8 +17,8 @@ empty for a package-installed CLI, or include that exact script in source_files.
 The index omits hashes/repeated lists in this prompt only; full inventory and
 omitted/unread records remain in audit files. Files absent from materials are unread.
 Request only needed installation/entry/test evidence within read_budget. Do not
-claim unread large test vectors were read. An unread-test rejection needs relevant
-material, not removing assertions or inventing expected outputs.
+claim unread large test vectors were read. An unread-test rejection needs the
+relevant material, never invented expected outputs.
 Generated files are installation/config files ONLY; never change source or tests.
 Do not select source Dockerfile or .dockerignore (the renderer owns these). Source
 execution/fixtures.json may be copied unchanged; generated runner cases live at
@@ -31,24 +31,27 @@ For each resource, required_for_execution describes necessity for the selected
 entrypoint and supported input contract. An optional upstream predictor, training
 weight or service outside this entrypoint's scope may be unavailable without
 blocking execution; keep available=false and explain the scope with source
-evidence. Unknown necessity remains required with an unresolved question. Never
-mark an actually needed resource optional to pass validation.
+evidence. Never mark an actually needed resource optional to pass validation.
+resource_assessment states whether the requirement is known: status=complete needs
+source_path and source_quote quoting the read source; status=unknown needs no
+quotation but must name what is undetermined in unresolved. unknown blocks Docker
+execution, so it is the honest answer, never a shortcut past validation.
 Actively propose environment probes, interface cases and behavior tests. Try
 original tests/examples, independently derived tiny cases, justified metamorphic
 relations, or independent comparisons. Every oracle needs its source, derivation,
 tolerance and limitations. Existing fixtures are preserved by the executor.
 Never use output of the program under test as its own correctness oracle. Such
 values are regression baselines only. Guessed values are candidates, not supported
-oracles; agreement of another model is not independent evidence. Preserve original
-expectations on repair; fix environment/entrypoint/config, never tool source.
+oracles; agreement of another model is not independent evidence.
 case_json is a JSON object with args (string array), optional entrypoint (single
 executable overriding container ENTRYPOINT), expected_exit (integer), and optional
 stdout_equals (trimmed string), stdout_contains (strings), expected_json_lines
 (JSONL list), input_files (relative path -> content), output_file (relative under
 /output), timeout_seconds (1..test_seconds from execution_budget). Numeric JSON comparisons use tolerance.
-output_file means the TOOL must create that file, unless capture_stdout=true is
-explicitly set; that mode makes the runner persist stdout after container exit.
-For stdout-only tools use capture_stdout=true rather than inventing an output flag.
+output_file means the TOOL must create that file, unless capture_stdout is the JSON
+boolean true, which requires an explicit output_file and makes the runner persist
+stdout after container exit; use it for a stdout-only tool instead of inventing an
+output flag.
 /output is mounted only for cases declaring output_file. Environment probes must
 not assume this optional mount exists without requesting/creating a result file.
 Fixture contract rules. The validators are exact; a near miss is rejected as a plan
@@ -59,11 +62,9 @@ error, not repaired silently. Executable examples of each rule follow this polic
   least one of them inside case_json, or set case_json.entrypoint to an explicit
   test runner string; kind=candidate and kind=regression can never be a supported
   behavior oracle.
-- capture_stdout appears only together with output_file and must be a JSON boolean.
-- The allowed case_json keys are exactly args, entrypoint, expected_exit,
-  stdout_equals, stdout_contains, expected_json_lines, input_files, output_file,
-  timeout_seconds, relation, forbidden_input_file, capture_stdout and acceptance.
-  Anything else (for example stderr_contains, rejection, violates,
+- case_json takes no undeclared keys: the fields described in this policy (the case
+  fields above, relation, forbidden_input_file, capture_stdout and acceptance) are the
+  whole allowed set. Anything else (for example stderr_contains, rejection, violates,
   invalid_input_reason) belongs inside acceptance, not at the top level.
 - An acceptance operation selector item is exactly {index, equals}; equals is a
   literal token that must appear character-for-character inside that operation's own
@@ -86,10 +87,12 @@ directly with real input, not only help/version or independent checker code.
 For file tools that direct case needs input_files. The portable runner can save
 stdout on the host if the tool does not have its own output-file flag.
 When the answer is a full plan, a repair must still return the complete plan plus a
-diagnosis in reason; retained tests cannot be removed/weakened. When the request
-carries PATCH PROTOCOL, return patch operations as that protocol says instead of a
-second full plan. Do not relabel failures as unsupported unless the actual resource
-is missing. No host paths or secrets.
+diagnosis in reason. When the request carries PATCH PROTOCOL, return patch operations
+as that protocol says instead of a second full plan. A repair fixes environment,
+entrypoint or configuration: it may withdraw a promise this draft itself over-made,
+but never an upstream expectation, an accepted case, or scope the draft did not own.
+Do not relabel failures as unsupported unless the actual resource is missing. No host
+paths or secrets.
 Patch operations are {op: add|replace|remove, path: "/json/pointer", value_json: JSON TEXT}.
 value_json is always a JSON document encoded as a string. For the two JSON-text plan
 fields (acceptance_json and tests[].case_json) the validator accepts either the

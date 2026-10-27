@@ -104,10 +104,22 @@ patch-rejection-0.json: Patched plan schema error: {'args': [...], ...} is not o
 
 ## 7. 最小剩余工作（需授权）
 
-0. **预算已恢复到 8**（`validation/deepseek-api/acceptance-normal-input.json`）：运行 7 用的是 12，却在 **10/12** 因"重复非法补丁/无进展"停止，因此**停止点与预算无关**；后续批次按 8 次执行。
-1. **一条更精确的 policy 规则**（仍不改门禁）：
-   * 修改用例时**替换整个 `/tests` 数组**，且每个 `case_json` 必须是 JSON 文本字符串；
-   * 不要把 `/tests/<i>/case_json` 或 `/acceptance_json` 替换成解码后的对象；若必须逐字段替换，`value_json` 要**双重编码**（JSON 文本里再放 JSON 文本）。
+0. **预算**：`validation/deepseek-api/acceptance-normal-input.json` 当前是 **12 次**
+   （运营者本轮临时上调；此前曾改回 8）。运行 7 在 **10/12** 因"重复非法补丁/无进展"
+   停止，因此**停止点与预算无关**。
+1. **已实现、尚未验收的协议改动**（本轮仅代码 + 离线验证，0 次真实模型调用）：
+   * **嵌套指针**：`/acceptance_json/<pointer>`、`/tests/<i>/case_json/<pointer>` 先解码
+     该 JSON 文本字段、在内部应用指针、再重新编码；改一条 check/selector/断言不再需要
+     重发整段文档，也不必双重编码或整段替换 `/tests`。锁定计划仍禁止触碰
+     `/tests` 与 `/acceptance_json`，补丁仍是全有或全无。
+   * **撤回范围带保护**：锁定修复只能增长；被拒草稿的修复可撤回**自己**过度承诺的
+     用例/用途/检查，但调用方给定的必需用例名、已接受用例内容与上游 fixture 不可删改；
+     全量重写走同一检查，撤回写入 `planning/<n>/scope-delta-<k>.json`，不静默缩范围。
+   * **资源评估可诚实表达**：`status=unknown` 不再要求引用，但须在 `unresolved` 写明
+     未定项；执行策略不变，`resources_unknown` 仍阻止 Docker。
+   * **policy 去重**：capture_stdout、case_json 键表、修复期范围保持各只保留一处权威
+     表述（fixture 示例仍是可执行反/正例），prompt 由 12,291 B 变为 12,470 B 并已重新冻结。
+   * 这些改动没有放宽任何验收门禁，但**也没有被真实批次验证**。
 2. 之后重跑唯一一批（12 次预算、3600 s、新隔离目录）。
 3. 若仍不收敛，则需要重新评估：要么接受"该模型在 8–12 次预算内无法满足这套验收契约"，要么改变策略（更强模型/更多预算/把这套契约拆成可迭代的更小步骤）。
 
@@ -125,7 +137,7 @@ cd E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi
 $env:PATH = 'C:\Users\27343\AppData\Local\OpenAI\Codex\bin\2993767bd1dfb009;' + $env:PATH
 python -m creation_pipeline build validation/deepseek-api/acceptance-normal-input.json `
   --state-dir <new>\state --library-dir <new>\library
-python -m unittest discover -s tests -q      # 413 OK (3 skipped)
+python -m unittest discover -s tests -q      # 450 OK (3 skipped)
 ```
 
 **最终 SKILL.md**：未形成合格交付（候选在 `library/candidates/`）。
