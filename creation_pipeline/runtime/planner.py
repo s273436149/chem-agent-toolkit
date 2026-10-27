@@ -369,33 +369,24 @@ explicitly set; that mode makes the runner persist stdout after container exit.
 For stdout-only tools use capture_stdout=true rather than inventing an output flag.
 /output is mounted only for cases declaring output_file. Environment probes must
 not assume this optional mount exists without requesting/creating a result file.
-Fixture contract examples. The validators are exact; a near miss is rejected as a
-plan error, not repaired silently.
-- case_json is JSON TEXT (one string), never a nested object.
-  WRONG: "case_json": {"args": ["CCCOCCC"], "stdout_equals": "[]"}
-  RIGHT: "case_json": "{\"args\": [\"CCCOCCC\"], \"stdout_equals\": \"[]\"}"
+Fixture contract rules. The validators are exact; a near miss is rejected as a plan
+error, not repaired silently. Executable examples of each rule follow this policy.
+- case_json is JSON TEXT: one string holding the case object, never a nested object.
 - The only assertion keys are stdout_equals, stdout_contains, expected_json_lines
   and relation. A layer=behavior test with oracle_status=supported must carry at
   least one of them inside case_json, or set case_json.entrypoint to an explicit
   test runner string; kind=candidate and kind=regression can never be a supported
   behavior oracle.
-  WRONG: {"args": ["CCCOCCC"], "expected_exit": 0}          (exit code only)
-  RIGHT: {"args": ["CCCOCCC"], "stdout_equals": "[]"}
 - capture_stdout appears only together with output_file and must be a JSON boolean.
-  WRONG: {"args": ["x"], "capture_stdout": true}
-  WRONG: {"args": ["x"], "capture_stdout": "true", "output_file": "out.txt"}
-  RIGHT: {"args": ["x"], "capture_stdout": true, "output_file": "fragments.json"}
 - The allowed case_json keys are exactly args, entrypoint, expected_exit,
   stdout_equals, stdout_contains, expected_json_lines, input_files, output_file,
   timeout_seconds, relation, forbidden_input_file, capture_stdout and acceptance.
   Anything else (for example stderr_contains, rejection, violates,
   invalid_input_reason) belongs inside acceptance, not at the top level.
-- An acceptance operation selector item is exactly {"index": <int>, "equals":
-  "<literal token>"}; the token must appear character-for-character inside that
-  operation's own source_quote.
-  WRONG: selector:{args:[{index:0, pattern:"^.+$"}]}   (pattern is not a selector key)
-  WRONG: equals:"terminal_fragments" when the quote has no such token (invented)
-  RIGHT: selector:{args:[{index:0, equals:"SMILES"}]} and the quote contains SMILES
+- An acceptance operation selector item is exactly {index, equals}; equals is a
+  literal token that must appear character-for-character inside that operation's own
+  source_quote. A regex such as ^.+$ is not a selector value, and a token the source
+  does not contain cannot be invented.
 For metamorphic tests use relation={type:equal_stdout|jsonl_concat|numeric_scale,
  runs:[{args:[...],entrypoint:optional string},...], factor:optional number};
 equal_stdout compares all runs; jsonl_concat compares first run with concatenation
@@ -412,16 +403,16 @@ Include a representative supported test calling the configured tool entrypoint
 directly with real input, not only help/version or independent checker code.
 For file tools that direct case needs input_files. The portable runner can save
 stdout on the host if the tool does not have its own output-file flag.
-Repair responses must include the complete replacement PLAN and a diagnosis in
-reason; retained tests cannot be removed/weakened. Do not relabel failures as
-unsupported unless the actual resource is missing. No host paths or secrets.
+When the answer is a full plan, a repair must still return the complete plan plus a
+diagnosis in reason; retained tests cannot be removed/weakened. When the request
+carries PATCH PROTOCOL, return patch operations as that protocol says instead of a
+second full plan. Do not relabel failures as unsupported unless the actual resource
+is missing. No host paths or secrets.
 Patch operations are {op: add|replace|remove, path: "/json/pointer", value_json: JSON TEXT}.
 value_json is always a JSON document encoded as a string, so a plain string value
-carries its own quotes. Invalid JSON is an invalid patch, not a semantic rejection.
-  WRONG: {path:"/output_contract", value_json:"stdout"}             (bare word, not JSON)
-  RIGHT: {path:"/output_contract", value_json:"\"stdout\""}
-  WRONG: {path:"/choices", value_json:"[{choice: x}]"}
-  RIGHT: {path:"/choices", value_json:"[{\"choice\": \"x\"}]"}
+carries its own quotes, and a JSON-text field (acceptance_json, tests[].case_json)
+needs that text encoded once more. Invalid JSON is an invalid patch, not a semantic
+rejection. Executable examples follow this policy.
 """
 
 ACCEPTANCE_SPEC = """Acceptance v2: acceptance_json is a JSON object with invalid_input (required or
@@ -481,6 +472,62 @@ PLAN_SCHEMA['properties']['plan']['properties']['acceptance_json'] = {
     'type': 'string', 'description': ACCEPTANCE_SPEC}
 PATCH_SCHEMA['description'] = ACCEPTANCE_SPEC
 POLICY += '\nFollow the acceptance_json schema description: grounded v2 contracts, locked before execution.'
+
+
+# ---- executable examples ------------------------------------------------------
+# The examples are rendered by json.dumps so escaping and key quoting cannot drift
+# from what the validators accept. tests/pipeline/test_policy_examples.py parses
+# every rendered line and feeds the plan/patch forms through the real validators.
+def json_text(value):
+    """Render one JSON document as text (the form the plan/patch fields expect)."""
+    return json.dumps(value, ensure_ascii=False)
+
+
+CASE_PAYLOAD = {'args': ['CCCOCCC'], 'stdout_equals': '[]'}
+
+FIXTURE_EXAMPLES = {
+    # plan form: case_json must be text, not an object
+    'case_json_object': {'case_json': dict(CASE_PAYLOAD)},
+    'case_json_text': {'case_json': json_text(CASE_PAYLOAD)},
+    # plan form: an exit code alone is not a behavior assertion
+    'behavior_exit_only': {'args': ['CCCOCCC'], 'expected_exit': 0},
+    # plan form: capture_stdout needs output_file and a JSON boolean
+    'capture_stdout_no_file': {'args': ['x'], 'capture_stdout': True},
+    'capture_stdout_string': {'args': ['x'], 'capture_stdout': 'true', 'output_file': 'out.txt'},
+    'capture_stdout_ok': {'args': ['x'], 'capture_stdout': True, 'output_file': 'fragments.json'},
+    # acceptance operation selector item
+    'selector_regex': {'args': [{'index': 0, 'pattern': '^.+$'}]},
+    'selector_literal': {'args': [{'index': 0, 'equals': 'SMILES'}]},
+    # patch form: value_json is JSON text
+    'patch_bare_word': {'op': 'replace', 'path': '/output_contract', 'value_json': 'stdout'},
+    'patch_text_value': {'op': 'replace', 'path': '/output_contract',
+                         'value_json': json_text('stdout')},
+    'patch_case_text': {'op': 'replace', 'path': '/tests/0/case_json',
+                        'value_json': json_text(json_text(CASE_PAYLOAD))},
+}
+
+_E = FIXTURE_EXAMPLES
+POLICY += '\n' + '\n'.join([
+    'Fixture contract examples. Every line below is JSON text exactly as it must be',
+    'written; the rule it belongs to is the rule named in the policy above.',
+    '- case_json must be JSON text, never a nested object:',
+    '  WRONG: ' + json_text(_E['case_json_object']),
+    '  RIGHT: ' + json_text(_E['case_json_text']),
+    '- a supported behavior case needs an assertion; an exit code alone is not one:',
+    '  WRONG: ' + json_text(_E['behavior_exit_only']),
+    '  RIGHT: ' + json_text(CASE_PAYLOAD),
+    '- capture_stdout needs output_file and must be a JSON boolean:',
+    '  WRONG: ' + json_text(_E['capture_stdout_no_file']),
+    '  WRONG: ' + json_text(_E['capture_stdout_string']),
+    '  RIGHT: ' + json_text(_E['capture_stdout_ok']),
+    '- an operation selector item is exactly {index, equals} with a literal token:',
+    '  WRONG: ' + json_text(_E['selector_regex']),
+    '  RIGHT: ' + json_text(_E['selector_literal']),
+    '- patch value_json is JSON text; a JSON-text field needs one more encoding:',
+    '  WRONG: ' + json_text(_E['patch_bare_word']),
+    '  RIGHT: ' + json_text(_E['patch_text_value']),
+    '  RIGHT for a JSON-text field: ' + json_text(_E['patch_case_text']),
+]) + '\n'
 
 
 def plan(source, config, audit, opts, deadline, feedback=None, previous=None, call_guard=None):
