@@ -19,7 +19,7 @@
 | 项 | 值 |
 | --- | --- |
 | 运行时 HEAD | `6b468fc` |
-| 本次改动 | `33d087f`：policy 增加 selector 字面 token 与 patch 编码正反例；预算 8 → 12<br>`6b468fc`：`patch_plan` 应用补丁后立即按 `PLAN_SCHEMA` 校验，文本字段非文本时报 `PlanningError` |
+| 本次改动 | `33d087f`：policy 增加 selector 字面 token 与 patch 编码正反例；预算 8 → 12<br>`6b468fc`：`patch_plan` 应用补丁后立即按 `PLAN_SCHEMA` 校验，文本字段非文本时报 `PlanningError`<br>`2c767f4` 之后：**预算已改回 8**（运行 7 在 10/12 时因无进展停止，证明停止与预算无关） |
 | 源目录（只读） | `78003de47c8bee93c705cd3a2098ee1f90646aae`，未修改 |
 | 分支 | `integration/deepseek-api-backend`；未 merge / push / 发布 |
 | Codex CLI | `bin\2993767bd1dfb009\codex.EXE`（0.164.0-alpha.11.1，code-mode host 齐全），仅进程 PATH |
@@ -75,7 +75,7 @@ patch-rejection-0.json: Patched plan schema error: {'args': [...], ...} is not o
 
 | 项 | 值 |
 | --- | --- |
-| 应用层调用 | **10 / 12** |
+| 应用层调用 | **10 / 12**（当时上限 12；本次已改回 8，见 §7） |
 | Codex 回合 | 4（166.4 / 247.5 / 67.4 / 89.1 s） |
 | DeepSeek 请求 | 5（关联 1；规划 4，其中 3 轮为修复并全部被拒），全部 HTTP 200、无重试 |
 | API 重试 / CLI 重连 | 0 / 0 |
@@ -104,6 +104,7 @@ patch-rejection-0.json: Patched plan schema error: {'args': [...], ...} is not o
 
 ## 7. 最小剩余工作（需授权）
 
+0. **预算已恢复到 8**（`validation/deepseek-api/acceptance-normal-input.json`）：运行 7 用的是 12，却在 **10/12** 因"重复非法补丁/无进展"停止，因此**停止点与预算无关**；后续批次按 8 次执行。
 1. **一条更精确的 policy 规则**（仍不改门禁）：
    * 修改用例时**替换整个 `/tests` 数组**，且每个 `case_json` 必须是 JSON 文本字符串；
    * 不要把 `/tests/<i>/case_json` 或 `/acceptance_json` 替换成解码后的对象；若必须逐字段替换，`value_json` 要**双重编码**（JSON 文本里再放 JSON 文本）。
