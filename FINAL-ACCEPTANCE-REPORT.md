@@ -1,11 +1,92 @@
-# 最终验收报告（真实实验 · 第 9 次运行）
+# 最终验收报告（真实实验 · 第 10–12 次运行）
+
+日期：2026-10-27
+副本：`E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi`
+本次授权：最多 3 轮全新实验，每轮 10 次应用层调用，单次 600 s，每轮 3600 s，
+`api_retries=0`，无回退、无探针、失败不重启/不续批；轮次之间自行修复阻断缺陷。
+运行目录：`acceptance-deepseek-run10|11|12-20261027`
+
+## 最终结论
+
+**三轮真实实验全部执行完毕，均未通过；Docker 构建仍未发生。** 每一轮都在更深处阻塞，
+且每一处阻塞都被定位为管线/协议缺陷并已离线修复：
+
+| 轮次 | 构建 | 调用 | 停止点 | 暴露缺陷 | 处置 |
+| --- | --- | --- | --- | --- | --- |
+| 10 | `20261027T190606-63ec7fc1` | 4/10 | 入口关联 | 关联提案用上游路径 `rdkit/Chem/Recap.py`，而快照文件是 `document.py`，精确子串找不到候选 | 已修：提示给出允许的 `citation_paths`；唯一快照可别名解析，引文仍按该文件字节校验 |
+| 11 | `20261027T191957-78146c53` | 8/10 | 环境规划 R2 | `none_documented` 操作按提示不应带 checks，校验器却要求非空；且规划器看不到作者声明的拒绝检查 | 已修：校验与提示一致；作者声明检查以紧凑形式进入规划约束 |
+| 12 | `20261027T193932-92618ce4` | 6/10 | 环境规划 R1 | 完整计划把 `acceptance_json` 返回为对象（补丁路径一直接受两种编码） | 已修：完整计划与补丁共用同一编码归一化；语义门禁照旧拒绝 `invalid_input=true` |
+
+三轮合计 **18/30** 次调用，墙钟约 1 小时，`600 s/次` 与 `3600 s/轮` 均未触及；
+无回退、无重试、无认证探针、失败后未重启或续批。
+Docker 构建、业务验收、catalog 晋升、安装与安装后使用全部 `not_run`。
+
+> 审查由**当前执行代理**完成，依据源码、调用路径与反例；**并非独立模型复核**。
+
+## 1. 三轮的账本与阶段
+
+| 项 | run 10 | run 11 | run 12 |
+| --- | --- | --- | --- |
+| 来源准备 / 发现 / 编写 / 独立审阅 | ✅ | ✅ | ✅ |
+| 入口关联 | ❌ `binding_unresolved` | ✅ 作者声明 `scripts/recap_fragments.py` | ✅ |
+| 环境规划 | `not_run` | ❌ 两轮后 `planning_no_progress` | ❌ R1 `model_schema_mismatch` |
+| Docker / 业务验收 / 晋升 / 安装 | `not_run` | `not_run` | `not_run` |
+| 应用层调用 | 4 | 8 | 6 |
+
+`pin_base_image` 在三轮中均**未被执行**（没有任何一轮进入 preparation 的镜像解析）。
+
+## 2. 本轮修复（每处都有回归）
+
+| # | 缺陷 | 修复 | 回归 |
+| --- | --- | --- | --- |
+| F1 | 关联引文路径歧义（快照 vs 上游） | `entry.associate` 提示列出 `citation_paths`；`_candidate_source` 唯一别名解析；绑定记录快照路径+sha256+别名 | `test_association_alias.py`（6） |
+| F2 | `none_documented` 操作被强制要求 checks；规划器看不到作者拒绝检查 | `contracts` 与提示一致（required 至少一个具名 check，none_documented/not_applicable 无 checks）；`preparation.declared_checks` 进入规划约束 | `test_input_contract.py`、`test_migrated_execution.py` |
+| F3 | 完整计划不接受对象编码 | `normalize_text_fields` 复用于完整计划与 `validate_plan`；语义门禁仍判定状态 | `test_plan_text_fields.py`（6） |
+
+修复后离线回归：**515 OK (3 skipped)**；`verify_prompt_contract`、`verify_acceptance_prompt check`、
+`verify_planner check` 全部通过；冻结提示重建为 **15,204 B**。
+
+## 3. 未验证范围与最小剩余工作
+
+未验证：Docker 构建、全部业务验收、catalog 晋升、默认查询/安装、容器内使用、
+`pin_base_image` 的解析与冻结、三态 `none_documented` 的真实选用。
+
+三轮的模式很清楚：每一轮都让链路更深一层（关联 → 规划 ×2 → 规划编码），缺陷都在**提示与
+校验器的措辞/编码边界**上，业务语义门禁本身没有放宽。要走到 Docker 至少还需要一轮：
+建议 **12 次调用**（3 Codex + 关联/审阅 2 + 规划 2–3 + 契约诊断/余量），其余约束不变。
+第 12 轮的对象编码缺陷修复后，同一计划会进入语义门禁并得到可修复的诊断，而不是直接终止。
+
+## 4. 证据与可复现
+
+```text
+validation/deepseek-api/evidence/
+  real-batch-run10-20261027/  （26 文件，202 KB）关联提案、提示、记录
+  real-batch-run11-20261027/  （85 文件，658 KB）两轮规划与拒绝诊断
+  real-batch-run12-20261027/  （56 文件，413 KB）对象编码失败的原样回答
+```
+
+三轮证据均 0 次凭据形状命中；失败轮次从未被重启或续批。
+
+```powershell
+$env:PATH = 'C:\Users\27343\AppData\Local\OpenAI\Codex\bin\2993767bd1dfb009;' + $env:PATH
+cd E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi
+python -m creation_pipeline build validation/deepseek-api/acceptance-normal-input.json `
+  --state-dir <new>\state --library-dir <new>\library
+python -m unittest discover -s tests -q      # 515 OK (3 skipped)
+```
+
+**最终 SKILL.md**：未形成合格交付；三轮的候选都只落在 `library/candidates/rdkit-recap-terminal-fragments`。
+
+## 运行 9 记录（历史，结论保留）
+
+### 运行 9 结论
 
 日期：2026-10-27
 副本：`E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi`
 本次运行目录：`E:\Users\27343\Docker\acceptance-deepseek-run9-20261027`
 构建 ID：`20261027T183705-770487a9`（18:37:05 → 18:56:05，墙钟 19 分 0 秒）
 
-## 最终结论
+### 运行 9 结论正文
 
 **仍然未通过，但已推进到真实规划阶段。** 本批首次在修复后的代码上完成
 来源准备 → 发现 → 编写 → 独立审阅 → 入口关联（作者声明的 `scripts/recap_terminal.py`），
@@ -22,7 +103,7 @@ Docker 构建、业务验收、晋升、安装均 `not_run`。本批 **7/8** 次
 
 > 独立代码与迁移审查由**当前执行代理**完成，依据源码、调用路径与反例；**并非独立模型复核**。
 
-## 1. 基线与提交
+### 运行 9 基线
 
 | 项 | 值 |
 | --- | --- |
@@ -38,7 +119,7 @@ Docker 构建、业务验收、晋升、安装均 `not_run`。本批 **7/8** 次
 `tests/pipeline/test_patch_encoding.py` 与 `test_planner_schema.py` 覆盖该规则、
 冻结提示/证明重新冻结、本报告与 `validation/deepseek-api/` 证据。
 
-## 2. 运行 9 各阶段
+### 运行 9 各阶段
 
 | 阶段 | Provider / 模型 | 状态 | 证据 |
 | --- | --- | --- | --- |
@@ -54,7 +135,7 @@ Docker 构建、业务验收、晋升、安装均 `not_run`。本批 **7/8** 次
 | catalog 晋升 | — | `not_run` | `candidate_saved`（candidates 区） |
 | 安装 / 安装后使用 | — | `not_run` | 无合格正式产物 |
 
-## 3. 调用账本与预算
+### 运行 9 调用账本
 
 | 项 | 实际 |
 | --- | --- |
@@ -67,7 +148,7 @@ Docker 构建、业务验收、晋升、安装均 `not_run`。本批 **7/8** 次
 | 停止原因 | 规划 R2 本地 schema 校验失败（模型输出无效），非预算/超时 |
 | 发送指纹（本批真实记录） | R1：prompt `ea12a80b…`（50,178 B）+ schema `141f8b01…`；R2：prompt `1b5365e5…`（62,182 B）+ schema `0ac6d7fa…` |
 
-## 4. 审查发现、修复与未解决
+### 运行 9 审查发现
 
 | # | 严重度 | 位置 | 触发条件 | 影响 | 处置 |
 | --- | --- | --- | --- | --- | --- |
@@ -79,7 +160,7 @@ Docker 构建、业务验收、晋升、安装均 `not_run`。本批 **7/8** 次
 未证明事项（待核查）：`none_documented` 三态在真实规划中的选用（本批模型选了 `required`）；
 镜像摘要解析与 Docker 构建（未达该阶段）；Markdown 入口路径（本批为脚本入口）。
 
-## 5. 能力迁移映射与证据（源码与调用路径）
+### 运行 9 能力映射
 
 | 能力 | 机制 | 证据 |
 | --- | --- | --- |
@@ -91,7 +172,7 @@ Docker 构建、业务验收、晋升、安装均 `not_run`。本批 **7/8** 次
 | 提示协议与发送指纹 | `INPUT_CONTRACT_SPEC` 单一源 + `build_prompt/schema_for/provenance` | 本批两轮真实记录 prompt/schema sha256 |
 | 删除 | 无 | 生产树对 `validation/`、`frozen/` 0 引用 |
 
-## 6. 未验证范围与最小剩余工作
+### 运行 9 未验证范围
 
 未验证：Docker 构建、全部业务验收、catalog 晋升、默认查询/安装、容器内使用、镜像摘要解析、
 三态 `none_documented` 的真实选用、故障注入类资格撤销。
@@ -103,7 +184,7 @@ Docker 构建、业务验收、晋升、安装均 `not_run`。本批 **7/8** 次
 3. Docker 阶段尚未真实验证 `pin_base_image` 的解析与冻结，下批需观察 `base-image.json` 与
    `FROM repo@sha256:...` 实际渲染。
 
-## 7. 证据与可复现
+### 运行 9 证据
 
 ```text
 validation/deepseek-api/evidence/real-batch-run9-20261027/
