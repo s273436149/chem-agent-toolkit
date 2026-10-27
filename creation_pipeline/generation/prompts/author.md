@@ -52,6 +52,10 @@ required status needs at least one citation. Checks should
 exercise actual delivered examples/scripts, use source-grounded expected results and relevant
 boundaries; do not invent a check simply to satisfy a template. Each test has name, argv, cwd,
 expected_exit, stdout_contains and/or json_equals/artifacts, evidence, purpose, kind.
+json_equals is an OBJECT mapping a dotted field/index path into the parsed stdout JSON to
+its exact expected value, for example {"leaves": ["*CCO"]}, {"count": 0} or {"0": "*CCC"}
+for a top-level JSON array. It is never the whole JSON value: an array or scalar there is
+rejected. Use stdout_contains for substring assertions.
 A check needs a result assertion, not an exit code alone: every check, including a
 rejection check, must assert observable output (stdout_contains, json_equals or a
 nonempty artifact). "expected_exit only" is rejected by the delivery validator and
