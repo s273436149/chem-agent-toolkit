@@ -5,6 +5,38 @@ need an extra script solely to satisfy runtime packaging. Runtime preparation
 supports unchanged source scripts, reviewed source-associated scripts, and one
 complete Python fence in the final `SKILL.md`.
 
+## Resolution order
+
+The entry is resolved in this order; each step is validated and a failure blocks
+instead of falling through to a different entry.
+
+1. **Caller binding** (`runtime.<candidate>.binding`). The path, the delivered file
+   and the source association are checked. A failure is `binding_unresolved`; the
+   entry is never silently re-derived.
+2. **Author declaration** (`metadata.entry` in the delivery receipt, persisted with
+   it):
+   `{"kind":"script","path":"<delivered .py/.sh>"}` or
+   `{"kind":"markdown_python","path":"SKILL.md","block_index":<n>}` with an optional
+   `code_sha256`. This is how a package may deliberately deliver scripts plus
+   documentation examples without being called ambiguous.
+3. **Conservative recognition** for deliveries without a declaration: a single
+   conforming candidate is adopted; two candidates remain `entry_ambiguous`.
+
+A declaration only selects. It is validated before use - the path must be a safe
+relative path of a delivered file, a script entry must be a nonempty delivered
+`.py`/`.sh`, a Markdown entry must extract one complete unindented block (and match
+`code_sha256` when one is given), and static code checks still run. Source
+association, the exact-quotation check and the independent review are unchanged: a
+declaration cannot substitute for source evidence or reviewer approval.
+
+The resolved binding records `declaration` and `declaration_source`
+(`user_binding`, `author_declaration`, `identical_bytes` or `conservative`). Because
+the binding enters `inputs.bindings` - and therefore the revision fingerprint - the
+declaration, the entry locator/content hash and the delivered-file manifest are all
+bound to the delivery. The unchanged plan validator requires the plan to invoke the
+bound entry (`runtime_path`), so Docker executes that entry and cannot substitute
+another implementation.
+
 ## Association and invocation
 
 `runtime-prepare` and normal `build` share the same preparation, planner,
@@ -23,12 +55,14 @@ not synthesize or overwrite business code.
 
 ## Markdown Python v1
 
-The deterministic selector requires exactly one unindented, complete backtick
-fence labeled `python` or `py` in `SKILL.md`. It records the original Markdown
-SHA-256, zero-based block index, byte offsets, start line and exact code SHA-256.
-The code bytes, including line endings, are copied unchanged into `entry/skill.py`
-in the runtime handoff/build context. This file is runtime material, not an
-independently authored replacement for the Skill.
+Without a declaration the deterministic selector requires exactly one unindented,
+complete backtick fence labeled `python` or `py` in `SKILL.md`. A declared
+`block_index` selects one specific complete block, which is why a usage example no
+longer makes a Markdown delivery look ambiguous. Either way the selector records the
+original Markdown SHA-256, the zero-based block index, byte offsets, start line and
+exact code SHA-256. The code bytes, including line endings, are copied unchanged into
+`entry/skill.py` in the runtime handoff/build context. This file is runtime material,
+not an independently authored replacement for the Skill.
 
 Python is parsed without execution. Syntax errors and unresolved global names
 are content/context defects. Multiple blocks, nonstandard/nested fences, interactive

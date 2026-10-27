@@ -38,12 +38,18 @@ def validate_spec(spec):
     planner.options(spec.get('options', {}))
 
 
-def bind(package, sources, proposal=None):
-    """Automatic binding requires byte identity; adapted entrypoints need explicit evidence."""
+def bind(package, sources, proposal=None, entry=None):
+    """Automatic binding requires byte identity; adapted entrypoints need explicit evidence.
+
+    ``entry`` restricts the automatic byte-identity search to one declared delivered
+    path, so a declaration cannot be satisfied by a different file that happens to
+    equal a source.
+    """
     files = manifest(package)
     source_files = [(s, f) for s in sources for f in s["inventory"]]
     if proposal is None:
         matches = [(f, s, sf) for f in files if f["path"].endswith((".py", ".sh"))
+                   and (entry is None or f["path"] == entry)
                    for s, sf in source_files if f["sha256"] == sf["sha256"]]
         if len(matches) != 1:
             raise RuntimeBlocked("binding_unresolved", "No unique delivered executable/source identity; configure a binding", "binding")
@@ -190,11 +196,36 @@ def prepare(record, package, sources, workspace, spec, executor, call_guard=None
             raise RuntimeBlocked("requirements_unknown", d["inputs"]["requirement"]["reason"], "requirement")
         from .entry import associate, materialize, preflight
         host = None
+        declared = record.get('entry_declaration')
         if spec.get('binding') is not None:
+            # 1. The caller bound the entry explicitly. It is validated and a failure
+            # blocks; the entry is never silently re-derived.
             binding = bind(package, sources, spec['binding'])
+            binding['declaration_source'] = 'user_binding'
+        elif declared is not None:
+            # 2. The author declared the entry. The declaration selects, then the
+            # ordinary checks decide whether it is trustworthy.
+            entry = preflight(package, declared)
+            binding = None
+            if entry['kind'] == 'script':
+                try:
+                    binding = bind(package, sources, entry=entry['entry'])
+                except RuntimeBlocked:
+                    binding = None
+            if binding is None:
+                host = executor.host()
+                if host['gaps']:
+                    result['gaps'].extend(host['gaps'])
+                    raise RuntimeBlocked('planning_deferred', 'Docker unavailable; entry association and planning deferred without model calls')
+                binding = associate(record, package, sources, target / 'association', opts,
+                                    counted_call_guard, executor.deadline, entry=entry)
+            binding['declaration'] = entry.get('declaration')
+            binding['declaration_source'] = 'author_declaration'
         else:
+            # 3. No declaration: conservative recognition of a single candidate.
             try:
                 binding = bind(package, sources)
+                binding['declaration_source'] = 'identical_bytes'
             except RuntimeBlocked:
                 preflight(package)
                 host = executor.host()
@@ -202,6 +233,7 @@ def prepare(record, package, sources, workspace, spec, executor, call_guard=None
                     result['gaps'].extend(host['gaps'])
                     raise RuntimeBlocked('planning_deferred', 'Docker unavailable; association and planning deferred without model calls')
                 binding = associate(record, package, sources, target / 'association', opts, counted_call_guard, executor.deadline)
+                binding['declaration_source'] = 'conservative'
         write_json(target / "binding.json", binding)
         source = Path(workspace) / "handoff"
         handoff(package, sources, source)

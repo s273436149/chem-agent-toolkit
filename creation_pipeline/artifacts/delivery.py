@@ -63,6 +63,21 @@ def finish(run, package, token, metadata=None):
     for issue in data["issues"]:
         if not isinstance(issue, dict) or type(issue.get("blocking")) is not bool or not issue.get("description"):
             raise ValueError("Issues need description and blocking boolean")
+    entry = data.get("entry")
+    if entry is not None:
+        # The declaration selects the entry; it is validated against the delivered
+        # package during runtime preparation, never trusted on its own here.
+        import re
+        if not isinstance(entry, dict) or set(entry) - {"kind", "path", "block_index", "code_sha256"}:
+            raise ValueError("Entry declaration supports only kind, path, block_index and code_sha256")
+        if entry.get("kind") not in ("script", "markdown_python"):
+            raise ValueError("Entry declaration kind must be script or markdown_python")
+        if not isinstance(entry.get("path"), str) or not entry["path"].strip():
+            raise ValueError("Entry declaration needs a nonempty path")
+        if "block_index" in entry and (type(entry["block_index"]) is not int or entry["block_index"] < 0):
+            raise ValueError("Entry block_index must be a nonnegative integer")
+        if "code_sha256" in entry and not re.fullmatch(r"[0-9a-f]{64}", str(entry["code_sha256"])):
+            raise ValueError("Entry code_sha256 must be a lowercase SHA-256 hex digest")
     data.update(completed=True, token=token, package=str(package),
                 files=validate_package(package, state["config"]["limits"]["package_bytes"]))
     path = safe_relative(Path(run), "deliveries/" + package.name + ".json")

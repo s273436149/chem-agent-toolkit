@@ -1,5 +1,13 @@
 Build a usable English skill from the candidate and actual research sources. Follow the
 supplied minimum/packaging rules as semantic constraints, not a chapter template.
+Record metadata.entry naming the single executable entry of the delivery when it has
+one: {"kind":"script","path":"<delivered .py or .sh>"} or
+{"kind":"markdown_python","path":"SKILL.md","block_index":<n>} (optionally with the
+code_sha256 of that block). Declare it whenever the package ships scripts together with
+documentation examples, or more than one script; without a declaration such a package
+is refused as ambiguous instead of being guessed. The host validates the declaration
+against the actual package and still requires the source association and the
+independent review; the declaration is never evidence by itself.
 Record metadata.runtime_requirement with status required/not_required/unknown, a reason,
 and citations [{source_id,path,quote}] quoting the registered original source exactly.
 Use not_required only for an explicitly supported non-executable capability, never

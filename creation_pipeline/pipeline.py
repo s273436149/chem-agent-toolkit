@@ -108,12 +108,13 @@ def _candidate(session, config, entity, bundle, work, allow_generated, initial_f
                             entity[key] = update[key]
                 record.update(
                     runtime_requirement=artifact.get("runtime_requirement"),
+                    entry_declaration=artifact.get("entry"),
                     test_definitions={"configured": scoped["checks"], "generated": artifact["tests"]},
                     issues=artifact.get("issues", []), notes=artifact.get("notes", []),
                     additional_candidates=artifact.get("additional_candidates", []),
                     file_purposes=[{"path": f["path"], "purpose": f["purpose"]} for f in artifact["files"]])
                 write_json(work / entity["name"] / "authored-metadata.json", sanitized({k: record[k] for k in
-                    ("test_definitions", "issues", "notes", "file_purposes")}))
+                    ("test_definitions", "issues", "notes", "file_purposes", "entry_declaration")}))
                 reports = static_checks(directory, entity["name"], bundle=bundle)
                 initial = manifest(bundle)
                 if not any(r["status"] == "fail" for r in reports):
@@ -165,6 +166,7 @@ def _candidate(session, config, entity, bundle, work, allow_generated, initial_f
                         "findings": ["Previously failed checks removed/expected results changed; requires independent oracle review: " + ", ".join(changed)]})
                 record.update(status=classify(reports), checks=reports,
                     test_definitions={"configured": scoped["checks"], "generated": artifact["tests"]},
+                    entry_declaration=artifact.get("entry"),
                     issues=issues, notes=artifact.get("notes", []), file_purposes=[{"path": f["path"], "purpose": f["purpose"]} for f in artifact["files"]])
                 # Reviewer-requested checks are declarations too: disabled host
                 # execution must not silently drop them from the frozen contract.

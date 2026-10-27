@@ -1,10 +1,14 @@
 """Source association and deterministic delivered-entry materialization.
 
-No business implementation is generated here. A Markdown entry is exactly one
-unindented fenced Python block; its bytes, locator and delivery manifest are bound.
+No business implementation is generated here. The delivered entry is resolved in a
+fixed order - an explicit caller binding, then a validated author declaration, then
+conservative recognition of a single conforming candidate. A Markdown entry is one
+complete unindented fenced Python block; its bytes, locator and delivery manifest
+are bound.
 """
 import ast
 import builtins
+import copy
 import hashlib
 import json
 import math
@@ -24,7 +28,14 @@ class EntryError(ValueError):
         super().__init__(message)
 
 
-def markdown_entry(package):
+def markdown_entry(package, block_index=None):
+    """Extract the Markdown Python entry.
+
+    Without ``block_index`` the conservative rule applies: exactly one complete,
+    unindented ``python`` fence may exist. With an explicit index - supplied by the
+    author's declaration - that specific complete block is selected, so ordinary
+    documentation examples no longer make the delivery look ambiguous.
+    """
     path = safe_relative(Path(package), 'SKILL.md')
     if not path.is_file():
         raise EntryError('entry_missing', 'Missing delivered SKILL.md', 'content', 'content_defect')
@@ -32,8 +43,19 @@ def markdown_entry(package):
     # Deliberately narrow: no nested/list-indented fences, concatenation or REPL.
     blocks = list(re.finditer(rb'^```(?:python|py)[ \t]*\r?\n(.*?)^```[ \t]*(?:\r?\n|$)', raw, re.M | re.S))
     openings = re.findall(rb'^[ \t]*[`~]{3,}(?:python|py)\b[^\r\n]*', raw, re.M)
-    if len(blocks) != 1 or len(openings) != 1:
-        raise EntryError('entry_unsupported', 'Require exactly one complete, unindented ```python block in SKILL.md; multiple/interactive/ambiguous blocks are unsupported')
+    if block_index is None:
+        if len(blocks) != 1 or len(openings) != 1:
+            raise EntryError('entry_unsupported', 'Require exactly one complete, unindented ```python block in SKILL.md; multiple/interactive/ambiguous blocks are unsupported')
+        index = 0
+    else:
+        if type(block_index) is not int or block_index < 0:
+            raise EntryError('entry_declaration_invalid', 'A declared Markdown block index must be a nonnegative integer')
+        if not blocks:
+            raise EntryError('entry_unsupported', 'SKILL.md contains no complete, unindented ```python block')
+        if block_index >= len(blocks):
+            raise EntryError('entry_declaration_missing', 'Declared Markdown block %d does not exist; SKILL.md has %d complete block(s)'
+                             % (block_index, len(blocks)))
+        index = block_index
     # A Python-looking fence inside a larger literal fence is documentation,
     # not an executable block. Track outer backtick/tilde fences before binding.
     active = None
@@ -49,9 +71,9 @@ def markdown_entry(package):
             elif marker[:1] == active[:1] and len(marker) >= len(active) and not tail.strip():
                 active = None
         offset += len(line)
-    if blocks[0].start() not in top_level:
+    if blocks[index].start() not in top_level:
         raise EntryError('entry_unsupported', 'Python fence is inside a literal Markdown code block')
-    block = blocks[0]; code = block.group(1)
+    block = blocks[index]; code = block.group(1)
     try:
         text = code.decode('utf-8')
         tree = ast.parse(text)
@@ -73,20 +95,82 @@ def markdown_entry(package):
     if missing:
         raise EntryError('entry_context_missing', 'Python entry needs undeclared context: ' + ', '.join(sorted(missing)), 'content', 'content_defect')
     return {'kind': 'markdown_python', 'entry': 'SKILL.md', 'runtime_entry': 'entry/skill.py',
-            'extraction': {'rule': 'single-unindented-python-fence-v1', 'block_index': 0,
+            'extraction': {'rule': 'single-unindented-python-fence-v1', 'block_index': index,
                 'start_byte': block.start(1), 'end_byte': block.end(1),
                 'start_line': raw[:block.start(1)].count(b'\n') + 1,
                 'markdown_sha256': hashlib.sha256(raw).hexdigest(),
                 'code_sha256': hashlib.sha256(code).hexdigest()}}, code
 
 
-def preflight(package):
-    """Derive an entry only when the package has exactly one candidate.
+DECLARATION_FIELDS = frozenset({'kind', 'path', 'block_index', 'code_sha256'})
+DECLARATION_KINDS = frozenset({'script', 'markdown_python'})
 
-    Selection is explicit: a unique markdown python block, or exactly one
-    delivered script when no usable markdown block exists. Two possible entries
-    is ambiguity, and ambiguity is refused rather than resolved by preference.
+
+def declared_entry(package, declared):
+    """Resolve an author's structured entry declaration against the actual package.
+
+    The declaration only selects; it earns no trust by existing. The path must be a
+    safe relative path of a delivered file, a script entry must be a nonempty
+    delivered ``.py``/``.sh``, and a Markdown entry must extract uniquely and
+    completely (with the declared code identifier, when one is given, matching the
+    exact extracted bytes). Source association and independent review still run
+    afterwards and are never replaced by the declaration.
     """
+    package = Path(package)
+    if not isinstance(declared, dict):
+        raise EntryError('entry_declaration_invalid', 'The delivered entry declaration must be an object')
+    unknown = set(declared) - DECLARATION_FIELDS
+    if unknown:
+        raise EntryError('entry_declaration_invalid',
+                         'Unsupported entry declaration fields: ' + ', '.join(sorted(unknown)))
+    kind, path = declared.get('kind'), declared.get('path')
+    if kind not in DECLARATION_KINDS:
+        raise EntryError('entry_declaration_invalid', 'entry.kind must be script or markdown_python')
+    if not isinstance(path, str) or not path.strip():
+        raise EntryError('entry_declaration_invalid', 'entry.path must be nonempty text')
+    try:
+        safe_relative(package, path)
+    except ValueError as exc:
+        raise EntryError('entry_declaration_invalid', 'Unsafe entry path: ' + str(exc)) from exc
+    files = {f['path']: f for f in manifest(package)}
+    if path not in files:
+        raise EntryError('entry_declaration_missing',
+                         'Declared entry is not part of the delivered package: ' + path)
+    if kind == 'script':
+        if declared.get('block_index') is not None or declared.get('code_sha256') is not None:
+            raise EntryError('entry_declaration_invalid',
+                             'block_index and code_sha256 apply to markdown_python entries only')
+        if not path.endswith(('.py', '.sh')):
+            raise EntryError('entry_declaration_invalid',
+                             'A script entry must be a delivered .py or .sh file: ' + path)
+        if not files[path]['bytes']:
+            raise EntryError('entry_declaration_invalid', 'Declared script entry is empty: ' + path)
+        return {'kind': 'script', 'entry': path, 'runtime_entry': 'package/' + path,
+                'declaration': copy.deepcopy(declared)}
+    if path != 'SKILL.md':
+        raise EntryError('entry_unsupported',
+                         'A markdown_python entry is extracted from SKILL.md, not ' + path)
+    binding, code = markdown_entry(package, declared.get('block_index'))
+    expected = declared.get('code_sha256')
+    if expected is not None:
+        if not isinstance(expected, str) or expected != binding['extraction']['code_sha256']:
+            raise EntryError('entry_declaration_mismatch',
+                             'Declared code identifier does not match the extracted Markdown block')
+    binding['declaration'] = copy.deepcopy(declared)
+    return binding
+
+
+def preflight(package, declared=None):
+    """Resolve the delivered entry.
+
+    Ordering is deliberate. A validated author declaration wins over automatic
+    recognition, so a delivery may ship documentation examples plus scripts without
+    being called ambiguous. Without a declaration the conservative rule stands:
+    exactly one conforming candidate may be adopted, and two candidates remain
+    ambiguity rather than a preference.
+    """
+    if declared is not None:
+        return declared_entry(package, declared)
     scripts = [f['path'] for f in manifest(package) if f['path'].endswith(('.py', '.sh'))]
     markdown, markdown_error = None, None
     try:
@@ -132,7 +216,7 @@ def source_view(sources):
 def materialize(package, binding, target):
     if binding.get('kind') != 'markdown_python':
         return
-    actual, code = markdown_entry(package)
+    actual, code = markdown_entry(package, _bound_block(binding))
     if any(binding.get(k) != actual[k] for k in ('entry', 'runtime_entry', 'extraction')):
         raise ValueError('Markdown entry locator or bytes differ from bound delivery')
     output = safe_relative(Path(target), runtime_path(binding))
@@ -140,18 +224,30 @@ def materialize(package, binding, target):
     output.write_bytes(code)
 
 
+def _bound_block(binding):
+    """Reuse the bound block index so extraction is repeated, not re-selected."""
+    extraction = binding.get('extraction') or {}
+    index = extraction.get('block_index')
+    return index if type(index) is int and index >= 0 else None
+
+
 def verify_material(package, binding, material):
     if binding.get('kind') != 'markdown_python':
         return
-    actual, code = markdown_entry(package)
+    actual, code = markdown_entry(package, _bound_block(binding))
     if any(binding.get(k) != actual[k] for k in ('entry', 'runtime_entry', 'extraction')):
         raise ValueError('Markdown entry changed after binding')
     if safe_relative(Path(material), runtime_path(binding)).read_bytes() != code:
         raise ValueError('Extracted entry differs from exact delivered code bytes')
 
 
-def associate(record, package, sources, audit, opts, guard=None, deadline=None):
-    """One bounded proposal and independent semantic review, never self-approval."""
+def associate(record, package, sources, audit, opts, guard=None, deadline=None, entry=None):
+    """One bounded proposal and independent semantic review, never self-approval.
+
+    ``entry`` is a resolved binding (from a validated author declaration) or None
+    for conservative recognition. A declaration never waives the association
+    proposal, the exact-quotation check or the independent review.
+    """
     from . import model_call
     from .planner import api_options as planner_options, backend_model
     from .review import review_snapshot
@@ -162,7 +258,7 @@ def associate(record, package, sources, audit, opts, guard=None, deadline=None):
         if remaining < 1:
             raise EntryError('explicit_budget', 'Explicit runtime time limit reached before association/review', 'environment', 'caller_limit')
         return min(opts['model_timeout'], int(remaining)), int(remaining)
-    entry = preflight(package)  # deterministic failures never call a model
+    entry = entry if entry is not None else preflight(package)  # deterministic failures never call a model
     audit = Path(audit); audit.mkdir(parents=True, exist_ok=True)
     source_text = []
     for s in sources:
