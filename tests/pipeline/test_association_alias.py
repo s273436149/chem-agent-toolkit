@@ -102,6 +102,23 @@ class AliasTests(unittest.TestCase):
         self.assertIn('document.py', captured['prompt'])
         self.assertIn('belongs in reason', captured['prompt'])
 
+    def test_the_independent_review_uses_the_batch_native_provider(self):
+        """The association review is a model stage: it must not silently use the CLI."""
+        captured = {}
+
+        def fake_review(*args, **kwargs):
+            captured.update(kwargs)
+            return {'review': {'status': 'pass', 'binding_verified': True,
+                               'requirement_assessment': 'confirmed'}, 'receipts': [], 'files': []}
+
+        options = dict(OPTIONS, native_model={'backend': 'deepseek_api', 'api_model': 'deepseek-v4-pro'})
+        with patch('creation_pipeline.runtime.model_call.call', return_value=(self.proposal('document.py'), {})), \
+                patch('creation_pipeline.runtime.review.review_snapshot', side_effect=fake_review):
+            entry.associate({'name': 'probe'}, self.package, self.sources,
+                            self.root / 'audit-provider', options, entry=self.entry)
+        self.assertEqual(captured['backend'], 'deepseek_api')
+        self.assertEqual(captured['api_model'], 'deepseek-v4-pro')
+
 
 if __name__ == '__main__':
     unittest.main()

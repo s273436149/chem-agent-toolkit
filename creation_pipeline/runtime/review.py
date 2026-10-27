@@ -11,14 +11,16 @@ from creation_pipeline.artifacts.package import manifest
 
 def review_snapshot(record, package, sources, work, *, proposed_plan=None, correction=None, proposed_binding=None, model=None,
                     timeout=600, total_seconds=None, call_guard=None, transport='default', reasoning_effort=None,
-                    service_tier=None):
+                    service_tier=None, backend='codex_cli', api_model=None):
     work = Path(work); work.mkdir(parents=True, exist_ok=False)
     raw = {'sources': [{'id': s['id'], 'path': s['path']} for s in sources], 'network': False,
            'prompt': 'Independently review the exact delivered files and source-bound execution scope. Do not run host business checks.',
-           'checks': [], 'model': {'backend': 'codex_cli'},
+           'checks': [], 'model': {'backend': backend},
            'limits': {'model_timeout': timeout, 'total_seconds': total_seconds}}
     if model:
         raw['model']['name'] = model
+    if api_model:
+        raw['model']['api_model'] = api_model
     # The review turn is a model stage like any other: keep the batch's transport
     # and effort settings instead of silently falling back to the user's config.
     raw['model']['transport'] = transport

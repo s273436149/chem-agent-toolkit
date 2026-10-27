@@ -457,6 +457,10 @@ def build(config_path=None, state_root=None, *, plan_only=False, plan_path=None,
                     # The caller's own wording is an obligation source for the
                     # invalid-input classification, not only the upstream source.
                     runtime_spec.setdefault('requirements', [config.get('prompt', '')] + list(config.get('constraints') or []))
+                    # The association review is an independent model stage too; give
+                    # runtime preparation the batch's native provider (no secrets).
+                    runtime_spec.setdefault('native_model', {key: config['model'].get(key) for key in
+                        ('backend', 'name', 'api_model', 'transport', 'reasoning_effort', 'service_tier')})
                     runtime_spec.setdefault("options", {}).setdefault("model", session.model_name)
                     runtime_spec["options"].setdefault("transport", config["model"].get("transport", "default"))
                     runtime_spec["options"].setdefault("progress_watch", config["execution"].get("progress_watch", "terminate"))

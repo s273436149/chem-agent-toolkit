@@ -21,9 +21,10 @@ class RuntimeBlocked(ValueError):
 
 def validate_spec(spec):
     if not isinstance(spec, dict) or set(spec) - {'binding', 'plan', 'options', 'resource_refs', 'constraints',
-                                                  'requirements', 'locked_cases', 'previous_plan', 'feedback'}:
+                                                  'requirements', 'locked_cases', 'previous_plan', 'feedback',
+                                                  'native_model'}:
         raise ValueError('Unsupported runtime preparation settings')
-    for key in ('binding', 'plan', 'options', 'resource_refs'):
+    for key in ('binding', 'plan', 'options', 'resource_refs', 'native_model'):
         if key in spec and not isinstance(spec[key], dict):
             raise ValueError('runtime.' + key + ' must be an object')
     if not isinstance(spec.get('constraints', []), list) or any(not isinstance(s, str) for s in spec.get('constraints', [])):
@@ -321,6 +322,9 @@ def prepare(record, package, sources, workspace, spec, executor, call_guard=None
         result['model_calls'] += 1
     binding = None
     opts = planner.options(spec.get("options", {}))
+    # The association review is an independent model stage like discovery/review, so
+    # it must run on the batch's native provider instead of silently using the CLI.
+    opts['native_model'] = copy.deepcopy(spec.get('native_model') or {})
     if opts["total_seconds"] is not None:
         deadline = time.monotonic() + opts["total_seconds"]
         executor.deadline = min(executor.deadline, deadline) if executor.deadline is not None else deadline

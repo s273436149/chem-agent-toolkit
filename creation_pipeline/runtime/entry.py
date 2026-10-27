@@ -355,10 +355,12 @@ def associate(record, package, sources, audit, opts, guard=None, deadline=None, 
         # points at the supplied snapshot whose bytes were checked.
         binding['source_path_alias'] = source_path_alias
     timeout, remaining = limits()
+    native = opts.get('native_model') or {}
     reviewed = review_snapshot(record, package, sources, audit / 'review', proposed_binding=binding,
-        model=opts['model'], timeout=timeout, total_seconds=remaining, call_guard=guard,
+        model=native.get('name') or opts['model'], timeout=timeout, total_seconds=remaining, call_guard=guard,
         transport=opts.get('transport', 'default'), reasoning_effort=opts.get('reasoning_effort'),
-        service_tier=opts.get('service_tier'))
+        service_tier=opts.get('service_tier'),
+        backend=native.get('backend', 'codex_cli'), api_model=native.get('api_model'))
     write_json(audit / 'independent-review.json', reviewed)
     result = reviewed['review']
     if result['status'] != 'pass' or result.get('binding_verified') is not True or result.get('requirement_assessment') != 'confirmed':
