@@ -25,7 +25,7 @@
     "progress_watch": "observe"
   },
   "limits": {
-    "model_calls": 8,
+    "model_calls": 10,
     "model_timeout": 600,
     "total_seconds": 3600,
     "agent_progress_timeout": null,
@@ -57,5 +57,5 @@
       "deepseek-api"
     ]
   },
-  "notes": "Run 9: normal fresh creation on the fixed RECAP case after two author-stage fixes (closed package layout guidance, aggregated delivery feedback) and after implementing pin_base_image. Operator-authorised budget: 8 admitted model calls, 600 s per call, 3600 s for the batch, api_retries=0, no fallback, no probe outside the budget. No runtime binding is pre-filled and the prompt does not require a script entry, so the delivered entry is resolved by the official flow (caller binding absent -> author declaration -> conservative recognition, ambiguity stays refused). Native stages keep the Codex CLI (https, medium, default). runtime_defaults route the structured planner/association/diagnosis calls to the DeepSeek API (deepseek-v4-pro). pin_base_image=true resolves the base reference to a repository digest at preparation, renders FROM repo@sha256:... and freezes the digest in the environment payload; execution refuses to build when the pinned image is missing locally. The 240 s silence window is observed only (execution.progress_watch=observe). Any Docker build or business acceptance failure stops the batch; no restart or resume."
+  "notes": "Run 10: normal fresh creation on the fixed RECAP case. Operator-authorised envelope: up to three consecutive fresh rounds, 10 admitted model calls each, 600 s per call, 3600 s per round, api_retries=0, no fallback, no probe outside the budget; blockers are fixed offline between rounds and each round is a new batch (a failed round is never resumed). No runtime binding is pre-filled and the prompt does not require a script entry, so the delivered entry is resolved by the official flow (caller binding absent -> author declaration -> conservative recognition, ambiguity stays refused). Native stages keep the Codex CLI (https, medium, default). runtime_defaults route the structured planner/association/diagnosis calls to the DeepSeek API (deepseek-v4-pro). pin_base_image=true resolves the base reference to a repository digest at preparation, renders FROM repo@sha256:... and freezes the digest in the environment payload; execution refuses to build when the pinned image is missing locally. The 240 s silence window is observed only (execution.progress_watch=observe). Any Docker build or business acceptance failure stops the round; no restart or resume."
 }
