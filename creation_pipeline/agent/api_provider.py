@@ -66,8 +66,11 @@ AUTHOR_INSTRUCTIONS = (
     'Source quotes you cite must be copied verbatim from the source text below.\n')
 PROVIDER_INSTRUCTIONS = {
     'discovery': ('\nAPI PROVIDER MODE. You have no tools and cannot read files: the resource '
-                  'workspace and the supplied source texts are inline below. Base every claim on '
-                  'them and do not claim to have inspected anything else. Return one JSON object '
+                  'workspace, the registered evidence locators and the supplied source texts are '
+                  'inline below. Base every claim on them and do not claim to have inspected '
+                  'anything else. Evidence ids in the answer must be one of the registered locator '
+                  'ids listed in SOURCE EVIDENCE (e1, e2, ...): never invent an id or use a '
+                  'descriptive name, and put the cited claim text in claim. Return one JSON object '
                   'that satisfies the schema exactly.\n'),
     'review': ('\nAPI PROVIDER MODE. You have no tools: the delivered files, checks and source '
                'material are inline below. Judge only what is shown and return one JSON object '
@@ -75,6 +78,16 @@ PROVIDER_INSTRUCTIONS = {
     'author': AUTHOR_INSTRUCTIONS,
 }
 SOURCE_TEXT_BUDGET = 240000
+
+
+def evidence_index(sources):
+    """The registered locator ids a discovery or author answer may cite."""
+    result = []
+    for item in getattr(sources, 'evidence', None) or []:
+        if not isinstance(item, dict) or not item.get('id'):
+            continue
+        result.append({'id': item['id'], 'source': item.get('source'), 'path': item.get('path')})
+    return result
 
 
 def provider(config):

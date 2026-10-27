@@ -95,6 +95,10 @@ class StageTests(unittest.TestCase):
     def test_a_discovery_stage_makes_one_api_call_and_records_it(self):
         with tempfile.TemporaryDirectory() as tmp:
             instance = session(tmp)
+            instance.sources = SimpleNamespace(
+                manifest=lambda: [], entries={}, limits={},
+                evidence=[{'id': 'e1', 'source': 'recap', 'path': 'document.py'},
+                          {'id': 'e2', 'source': 'license', 'path': 'document.txt'}])
             with patch.object(api_provider, 'call', return_value=(dict(OK), {'usage': {'total_tokens': 5},
                                                                             'finish_reason': 'stop',
                                                                             'elapsed_seconds': 0.1})) as call:
@@ -109,6 +113,10 @@ class StageTests(unittest.TestCase):
             prompt = (folder / 'prompt.txt').read_text(encoding='utf-8')
             self.assertIn('API PROVIDER MODE', prompt)
             self.assertIn('SOURCE TEXTS', prompt)
+            # The model can only cite locator ids it can see (run 20 invented one).
+            self.assertIn('SOURCE EVIDENCE', prompt)
+            self.assertIn('"e1"', prompt)
+            self.assertIn('cite these ids only', prompt)
             self.assertEqual(json.loads((folder / 'result.json').read_text(encoding='utf-8')), OK)
 
     def test_an_author_stage_materialises_the_package_and_passes_host_finalisation(self):
