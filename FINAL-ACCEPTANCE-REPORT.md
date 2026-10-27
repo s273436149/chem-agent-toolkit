@@ -126,7 +126,14 @@ patch-rejection-0.json: Patched plan schema error: {'args': [...], ...} is not o
      文本），上游沉默不能豁免；`none_documented` 要求记录检查材料及其指纹、范围、理由、
      limitation 与独立确认，且**不能**替代用户明确要求的非法输入验收——缺独立审阅产物时
      `invalid_input_review_missing` 阻塞。修复轮降级必须带证据，锁定契约不可改。
-     prompt 由 12,470 B 变为 13,859 B 并已重新冻结。
+   * **提示协议已与校验器同步**：三态规则只有一处权威文本（`INPUT_CONTRACT_SPEC`），
+     同时渲染进 POLICY 正文与 `acceptance_json` 的 schema description，两者无法各说各话；
+     修复协议抽成生产与审计共用的 `patch_protocol()`。`verify_prompt_contract.py` 离线重建
+     POLICY、补丁协议、两份 schema 以及**冻结的** prompt/schema 并核对：校验器要求的字段与
+     状态必须出现，旧的"两态/整段替换"表述必须消失，修复反馈必须点名缺失证据。审计接入
+     测试套件（`test_prompt_contract`），规则与提示脱节即失败。
+     代价是提示变大：POLICY 9.5 KB → 12.1 KB，schema description 3.9 KB → 5.7 KB，
+     frozen prompt 12,291 B → **14,814 B**（已重新冻结）。
    * 这些改动没有放宽任何验收门禁，但**也没有被真实批次验证**。RECAP 历史已接受计划仍是
      `required`（引用交付 `entry/skill.py` 的空白校验），`verify_original_case check`
      显示它在未放宽的门禁下通过（8 个用例）；因此该案例不会、也不应靠新增
@@ -148,7 +155,7 @@ cd E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi
 $env:PATH = 'C:\Users\27343\AppData\Local\OpenAI\Codex\bin\2993767bd1dfb009;' + $env:PATH
 python -m creation_pipeline build validation/deepseek-api/acceptance-normal-input.json `
   --state-dir <new>\state --library-dir <new>\library
-python -m unittest discover -s tests -q      # 478 OK (3 skipped)
+python -m unittest discover -s tests -q      # 485 OK (3 skipped)
 ```
 
 **最终 SKILL.md**：未形成合格交付（候选在 `library/candidates/`）。

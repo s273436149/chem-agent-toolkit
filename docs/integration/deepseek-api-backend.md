@@ -267,6 +267,9 @@ python -m unittest tests.pipeline.test_deepseek_backend -v
 # small fixture: frozen planner prompt/schema, rebuild and compare, no request
 python validation/deepseek-api/verify_planner.py check
 
+# every prompt surface states the contract the validators enforce (no request)
+python validation/deepseek-api/verify_prompt_contract.py
+
 # saved original RECAP case: integrity + gate rehearsal, no request
 python validation/deepseek-api/verify_original_case.py check
 

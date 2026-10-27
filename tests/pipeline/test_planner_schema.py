@@ -21,6 +21,15 @@ def annotations(value, path=''):
     return result
 
 
+def strip_descriptions(value):
+    """Remove documentation only; every structural key stays exactly as it is."""
+    if isinstance(value, dict):
+        return {key: strip_descriptions(child) for key, child in value.items() if key != 'description'}
+    if isinstance(value, list):
+        return [strip_descriptions(child) for child in value]
+    return value
+
+
 class PlannerSchemaTests(unittest.TestCase):
     def test_acceptance_documentation_is_only_on_intended_nodes(self):
         self.assertEqual(annotations(planner.PLAN_SCHEMA), {
@@ -36,18 +45,20 @@ class PlannerSchemaTests(unittest.TestCase):
         self.assertNotIn('description', schema['properties']['plan']['properties']['base_image'])
 
     def test_exact_baseline_except_misdirected_annotations(self):
+        """The schema shape is frozen; the documentation text is not.
+
+        The baseline is the pre-fix snapshot: it still carries the acceptance text on
+        every field that shared ``S``. Only the intended node keeps that
+        documentation, so every baseline description is normalized away before the
+        exact shape comparison, and the intended node's *content* is asserted to be
+        the current ``ACCEPTANCE_SPEC`` by the test above. Pinning the old text here
+        would let the model be sent a contract the validators no longer accept.
+        """
         root = Path(__file__).resolve().parents[2] / 'validation/planner-schema-isolation/before'
-        for name, current, keep in [
+        for name, current, intended in [
             ('plan', planner.PLAN_SCHEMA, '/properties/plan/properties/acceptance_json/description'),
             ('patch', planner.PATCH_SCHEMA, '/description')]:
             baseline = json.loads((root / (name + '.json')).read_text(encoding='utf-8'))
-            for path in annotations(baseline):
-                if path == keep:
-                    continue
-                node = baseline
-                parts = path.strip('/').split('/')
-                for part in parts[:-1]:
-                    node = node[int(part)] if isinstance(node, list) else node[part]
-                del node[parts[-1]]
-            # Exact comparison preserves required, enums, types, bounds, and closed objects.
-            self.assertEqual(current, baseline)
+            self.assertIn(intended, annotations(baseline))
+            # Documentation is compared by the test above, not pinned to a snapshot.
+            self.assertEqual(strip_descriptions(current), strip_descriptions(baseline))

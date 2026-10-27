@@ -22,6 +22,12 @@ class ContractConflict(ValueError):
 #   not_applicable    the operation has no caller-supplied business input at all
 INPUT_STATES = ('required', 'none_documented', 'not_applicable')
 AGGREGATE = {'required': 3, 'none_documented': 2, 'not_applicable': 1}
+# The fields each state must carry. The prompt audit derives its needles from this,
+# so a validator rule cannot be added without the model-visible text following.
+CONTRACT_FIELDS = {'required': ('constraint',),
+                   'none_documented': ('reason', 'scope', 'limitation', 'checked', 'review'),
+                   'not_applicable': ('reason',)}
+CONTRACT_LINKAGE = ('materials_sha256', 'context')
 
 
 def materials_digest(checked):
@@ -52,8 +58,10 @@ def input_contract(record, index, source, where='Input contract'):
         if not isinstance(record.get('reason'), str) or not record['reason'].strip():
             raise ValueError(where + ': not_applicable needs a reason why no caller input exists')
         return status
-    for field in ('reason', 'scope', 'limitation'):
-        if not isinstance(record.get(field), str) or not record[field].strip():
+    for field in CONTRACT_FIELDS['none_documented']:
+        value = record.get(field)
+        filled = value.strip() if isinstance(value, str) else value
+        if not filled:
             raise ValueError(where + ': none_documented needs a nonempty ' + field)
     checked = record.get('checked')
     if not isinstance(checked, list) or not checked:

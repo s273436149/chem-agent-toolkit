@@ -55,23 +55,36 @@ output flag.
 /output is mounted only for cases declaring output_file. Environment probes must
 not assume this optional mount exists without requesting/creating a result file.
 Invalid-input requirement and its verification are separate. acceptance_json
-classifies each operation (and the whole tool when it declares no operations) with
-input_contract {status, ...} in one of three states:
+classifies each operation, or the whole tool when it declares no operations, with
+input_contract in one of three states: required, none_documented, not_applicable.
+The authoritative rules and required fields for each state are these, and the same
+text is carried in the acceptance_json schema description:
+Invalid-input requirement and its verification are separate. acceptance_json
+classifies each operation, or the whole tool when it declares no operations, with
+input_contract {status, ...} in exactly one of three states. Every operation declares
+its own input_contract; a required operation needs one rejection case per named check,
+while none_documented and not_applicable operations need none.
 - required: the caller, the delivered interface (a wrapper's own error branch counts)
-  or the source states a constraint; give constraint and named checks, and one real
+  or the source states a constraint. Give constraint and named checks, and one real
   rejection case per check. Upstream silence never waives a delivered promise; cite
-  the delivered file when that is the basis.
+  the delivered entry file when that is the basis.
 - none_documented: no examined material and no promise declares a contract. Give
   reason, scope, limitation, checked:[{source_path, sha256}] naming the examined
   materials with their fingerprints, and review:{status:"confirmed", reviewer,
-  materials_sha256}. A quotation is optional context, never proof of absence. It
-  waives only an invented rejection expectation and is reported as a validation gap.
-- not_applicable: no caller-supplied business input; give reason. A fixed-example
-  tool need not invent an input interface; an input-taking tool is never exempt.
-invalid_input is the strongest declared state. Coverage reports coverage_complete,
-validation_gaps and blockers separately; a stated obligation without a verifiable
-contract blocks, and no recorded gap can replace it. A repair may correct a draft
-classification only when it carries this recorded evidence.
+  materials_sha256} bound to that list, from an independent review that saw them. A
+  quotation is optional context (context:{source_path, source_quote}), never proof of
+  absence. It waives only an invented rejection expectation and is reported as a
+  validation gap; it never waives a requirement stated by the caller, the delivered
+  interface or the source.
+- not_applicable: the operation has no caller-supplied business input; give reason.
+  A fixed-example tool need not invent an input interface; an input-taking tool is
+  never exempt this way.
+invalid_input is the strongest declared state. Only a required state may carry
+checks. Coverage reports coverage_complete (were the applicable declared checks
+covered), validation_gaps (behavior with no contract basis) and blockers (a stated
+obligation without a verifiable contract) separately; a blocker is never replaced by
+a recorded gap. A repair may correct a draft classification only with this recorded
+evidence; a locked acceptance contract stays as it is.
 Fixture contract rules. The validators are exact; a near miss is rejected as a plan
 error, not repaired silently. Executable examples of each rule follow this policy.
 - case_json is JSON TEXT: one string holding the case object, never a nested object.

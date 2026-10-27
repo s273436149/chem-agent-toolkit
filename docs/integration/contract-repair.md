@@ -149,6 +149,15 @@ result.json。因此程序可直接证明前两个内部矛盾，不能跨文件
    `none_documented` 过关；没有用户输入的固定示例程序则可以正当声明 `not_applicable`，
    不必凭空承担不存在的输入接口。
 
+6. **提示协议同步**：三态规则只有一处权威文本 `planner.INPUT_CONTRACT_SPEC`，同时渲染进
+   POLICY 正文与 `acceptance_json` 的 schema description（DeepSeek 走 system prompt，Codex
+   走 `--output-schema`），两者不可能各说各话；修复协议 `planner.patch_protocol()` 是生产
+   与审计共用的真实函数。`validation/deepseek-api/verify_prompt_contract.py` 离线重建
+   POLICY、补丁协议、两份 schema、**冻结的** `frozen/prompt-0.txt` 与 `frozen/schema.json`
+   并核对：每个校验器要求的字段与状态都必须出现，旧的"两态/整段替换"表述必须消失，
+   修复反馈必须点名缺失证据。`tests/pipeline/test_prompt_contract.py` 把同一审计接入测试套件，
+   规则与提示一旦脱节即失败。
+
 ## 自动修正边界
 
 提案绑定原修订、acceptance/source 指纹、逐用例旧值/新值、来源路径与精确引文，
