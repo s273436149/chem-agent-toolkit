@@ -51,6 +51,27 @@ explicitly set; that mode makes the runner persist stdout after container exit.
 For stdout-only tools use capture_stdout=true rather than inventing an output flag.
 /output is mounted only for cases declaring output_file. Environment probes must
 not assume this optional mount exists without requesting/creating a result file.
+Fixture contract examples. The validators are exact; a near miss is rejected as a
+plan error, not repaired silently.
+- case_json is JSON TEXT (one string), never a nested object.
+  WRONG: "case_json": {"args": ["CCCOCCC"], "stdout_equals": "[]"}
+  RIGHT: "case_json": "{"args": ["CCCOCCC"], "stdout_equals": "[]"}"
+- The only assertion keys are stdout_equals, stdout_contains, expected_json_lines
+  and relation. A layer=behavior test with oracle_status=supported must carry at
+  least one of them inside case_json, or set case_json.entrypoint to an explicit
+  test runner string; kind=candidate and kind=regression can never be a supported
+  behavior oracle.
+  WRONG: {"args": ["CCCOCCC"], "expected_exit": 0}          (exit code only)
+  RIGHT: {"args": ["CCCOCCC"], "stdout_equals": "[]"}
+- capture_stdout appears only together with output_file and must be a JSON boolean.
+  WRONG: {"args": ["x"], "capture_stdout": true}
+  WRONG: {"args": ["x"], "capture_stdout": "true", "output_file": "out.txt"}
+  RIGHT: {"args": ["x"], "capture_stdout": true, "output_file": "fragments.json"}
+- The allowed case_json keys are exactly args, entrypoint, expected_exit,
+  stdout_equals, stdout_contains, expected_json_lines, input_files, output_file,
+  timeout_seconds, relation, forbidden_input_file, capture_stdout and acceptance.
+  Anything else (for example stderr_contains, rejection, violates,
+  invalid_input_reason) belongs inside acceptance, not at the top level.
 For metamorphic tests use relation={type:equal_stdout|jsonl_concat|numeric_scale,
  runs:[{args:[...],entrypoint:optional string},...], factor:optional number};
 equal_stdout compares all runs; jsonl_concat compares first run with concatenation
