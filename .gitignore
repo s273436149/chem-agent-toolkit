@@ -1,0 +1,16 @@
+.DS_Store
+__pycache__/
+.pytest_cache/
+*.pyc
+.pipeline/
+.venv*/
+evaluation/**/cache/
+evaluation/**/runs/
+evaluation/**/results/
+validation/**/tmp/
+# Local credentials and run evidence are never committed.
+.env
+.env.*
+!.env.example
+validation/**/runs/
+validation/**/real/
