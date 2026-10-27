@@ -69,6 +69,19 @@ class _Captured(Exception):
     """Raised by the offline stub once the planner has produced its prompt."""
 
 
+OUTPUT_CODES = {'model_output_invalid', 'model_schema_mismatch', 'model_output_empty',
+                'model_output_truncated', 'model_output_incomplete', 'model_content_filtered'}
+
+
+def failure_status(code):
+    """Distinct verdicts, so a transport fault never reads like a rejected plan."""
+    if code == 'model_config_invalid':
+        return 'blocked_config_invalid'
+    if code in OUTPUT_CODES:
+        return 'blocked_model_output_invalid'
+    return 'blocked_model_unavailable'
+
+
 def fixture_digests():
     return {path.relative_to(SOURCE).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in sorted(SOURCE.rglob('*')) if path.is_file()}
@@ -209,7 +222,8 @@ def run(timeout):
                        plan_sha256=hashlib.sha256(
                            json.dumps(plan, sort_keys=True).encode('utf-8')).hexdigest())
     except planner.ModelUnavailable as exc:
-        outcome.update(status='blocked_model_unavailable', error_class=getattr(exc, 'code', None),
+        outcome.update(status=failure_status(getattr(exc, 'code', None)),
+                       error_class=getattr(exc, 'code', None),
                        reason=redact(str(exc))[:600])
     except planner.BudgetExceeded as exc:
         outcome.update(status='stopped_budget', reason=redact(str(exc))[:600])

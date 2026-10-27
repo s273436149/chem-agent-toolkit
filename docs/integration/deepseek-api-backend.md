@@ -99,6 +99,14 @@ Two model identities are kept apart on purpose:
 `backend` defaults to `codex_cli`, so existing configurations are unchanged. An
 unknown backend name is a configuration error, not a reason to try another one.
 
+`validation/deepseek-api/acceptance-input.json` is the acceptance configuration for
+this copy. It reproduces the finalized explicit-script-binding case - source set,
+prompt, execution profile, limits and the `binding` object are byte-identical to
+`validation/final-acceptance-review/input-batch-4.json` - and adds only the DeepSeek
+provider options. The binding fixes `scripts/terminal_fragments.py` as the entry, so
+a fresh creation must author that exact path; otherwise preparation stops at
+`binding_unresolved` without a model call.
+
 ## 4. Contract and correctness properties
 
 * `model_call.call` keeps its signature and its `(answer, receipt)` return contract.
@@ -124,27 +132,40 @@ unknown backend name is a configuration error, not a reason to try another one.
 
 ## 5. Deadline, retries and accounting
 
-* `timeout` is one application-level deadline covering DNS/connect, send, every
-  read, all stream consumption and any configured retry. Socket reads are sliced
-  (5 s) only so that the deadline is re-checked; a slow read is never promoted to
-  "the total timeout".
-* On expiry the connection is closed and the call raises `model_timeout`. The same
-  happens on cancellation: the `finally` block releases the socket before the
-  `KeyboardInterrupt` propagates.
-* No SDK is used (`http.client` directly), so there are no implicit retries. A
-  retry must be configured explicitly (`api_retries`, 0–3). Retries are counted in
-  the request ledger and stay inside the original deadline; credential, balance and
-  request-shape failures are never retried.
-* The audit directory of every structured call records: `request.json` (endpoint,
-  model, the parameters actually sent, prompt/schema/messages fingerprints, the
-  deadline scope, the progress policy), `attempts.json` (per-attempt ledger with
-  status, HTTP status, elapsed, error class, request id), `stream.json` (chunk,
-  keep-alive and byte counts), `response.json` on success and `error.json` on
-  failure, plus `schema.json`. The prompt body is not duplicated there (the callers
-  already persist it) and the credential is never written.
-* The receipt returned to the caller adds `backend`, `provider`, `request_params`,
-  `mapping`, `request_id`, `request_count`, `requests` and `completion` next to the
-  historical fields.
+`timeout` is one application-level deadline. Every blocking step re-derives its
+budget from what is actually left, so no phase can borrow a stale timeout:
+
+| Phase | Bound |
+| --- | --- |
+| DNS resolution | runs in a daemon worker, joined with the remaining budget; on expiry the call fails with `model_timeout` (`detail.phase=dns`) instead of overrunning |
+| TCP connect | socket timeout armed from the remaining budget, re-checked per address |
+| TLS handshake | socket re-armed with the remaining budget after the TCP connect succeeds |
+| Send (request line, headers, body) | re-armed immediately before the send |
+| Header wait (`getresponse`) | re-armed immediately before the wait, not inherited from connect |
+| Stream/body reads | 5 s slices, with the wall-clock deadline re-checked before every read |
+| Retry pause | clamped to the remaining budget |
+
+A socket timeout that fires because the armed budget ran out is classified
+`model_timeout`, not `model_connection_failed`. On expiry or cancellation the
+response and socket are closed before the error (or `KeyboardInterrupt`)
+propagates.
+
+No SDK is used (`http.client` directly), so there are no implicit retries. A retry
+must be configured explicitly (`api_retries`, 0–3). Retries are counted in the
+request ledger and share the same total deadline; credential, balance and
+request-shape failures are never retried.
+
+The audit directory of every structured call records: `request.json` (endpoint,
+model, the parameters actually sent, prompt/schema/messages fingerprints, the
+deadline scope, the progress policy), `attempts.json` (per-attempt ledger with
+status, HTTP status, elapsed, error class, request id), `stream.json` (chunk,
+keep-alive and byte counts), `response.json` on success and `error.json` on
+failure, plus `schema.json`. The prompt body is not duplicated there (the callers
+already persist it) and the credential is never written.
+
+The receipt returned to the caller adds `backend`, `provider`, `request_params`,
+`mapping`, `request_id`, `request_count`, `requests` and `completion` next to the
+historical fields.
 
 ## 6. Parameter mapping (no false equivalence)
 
@@ -161,23 +182,47 @@ conditions to the Codex ones.
 
 ## 7. What has been verified, and what has not
 
-Verified offline (hermetic, loopback HTTP server, no real request):
-completion over SSE and over a single response, local schema rejection (missing
+### 7.1 Offline (hermetic, loopback HTTP server, no real request)
+
+Completion over SSE and over a single response, local schema rejection (missing
 field, wrong type, non-object, non-JSON, empty), truncated and incomplete streams
 (`length`, missing `[DONE]`, missing `finish_reason`, malformed frame, dropped
-connection, `insufficient_system_resource`), authentication failure, insufficient
-balance, rate limit (with and without a configured retry), server error,
-connection failure, total-deadline expiry on a silent stream, cancellation with
-connection release, the caller's budget guard, configuration refusal (missing key,
-missing model, non-official endpoint, credentials in the URL, unknown backend) and
-credential redaction in the audit directory, the receipt and error messages.
+connection, `insufficient_system_resource`, streamed error frame, tool calls),
+authentication failure, insufficient balance, rate limit (with and without a
+configured retry), server error, connection failure, total-deadline expiry on a
+silent stream, on a server that never sends headers and on a stalled DNS resolver,
+shared deadline across retries, cancellation with connection release, the caller's
+budget guard, configuration refusal (missing key, missing model, non-official
+endpoint, credentials in the URL, unknown backend) and credential redaction in the
+audit directory, the receipt and error messages.
 
-Not verified here: a live DeepSeek response. The workspace-root `.env` that this
-migration was supposed to consume (`E:\Users\27343\Docker\.env`) does not exist in
-this environment, so `validation/deepseek-api/verify_planner.py run` stopped at
-`model_config_invalid` with **0 requests sent** (see
-`validation/deepseek-api/result.json`). No model name was guessed and no request
-was repeated.
+### 7.2 Two different planner fixtures - do not confuse them
+
+| Harness | Prompt | Proves | Does not prove |
+| --- | --- | --- | --- |
+| `verify_planner.py` | 8,568 B synthetic fixture (`validation/deepseek-api/fixture-source`, no third-party dependency) | the adapter connects, the transport/contract works, the frozen prompt is reproducible | whether the original slow RECAP case behaves better |
+| `verify_original_case.py` | the saved historical **45,397 B** RDKit RECAP planning request with its 151,668 B `PLAN_SCHEMA` | the real hard request, judged by the unchanged validators | end-to-end business acceptance |
+
+`verify_original_case.py check` runs entirely offline and proves the saved case is
+intact: the prompt and schema match the fingerprints recorded in that run's
+`request.json` (`2327f993…`, `67e030bf…`), the inventory is rebuilt from the copied
+handoff tree, the explicit markdown-python binding still matches the delivered
+package, and the plan that this case historically accepted still passes
+`preparation.validate` (8 cases). The replay is therefore comparable to the
+historical verdict instead of being a lookalike.
+
+### 7.3 Live status
+
+**No real DeepSeek request has been made.** The workspace-root `.env` that this
+migration is supposed to consume (`E:\Users\27343\Docker\.env`) does not exist, so
+both harnesses stop with `blocked_config_invalid` and **0 requests sent**
+(`validation/deepseek-api/result.json`,
+`validation/deepseek-api/result-original-case.json`). No model name was guessed and
+no request was repeated.
+
+The accurate status is therefore: **adapter implemented, offline verified, online
+verification not executed**. It is not yet evidence that routing the planner to
+DeepSeek helps the original timeout case.
 
 ## 8. How to run
 
@@ -188,11 +233,15 @@ python -m unittest discover -s tests -q
 # the new backend tests alone
 python -m unittest tests.pipeline.test_deepseek_backend -v
 
-# frozen planner prompt/schema: rebuild and compare, no request
+# small fixture: frozen planner prompt/schema, rebuild and compare, no request
 python validation/deepseek-api/verify_planner.py check
 
-# exactly one real request (<= 600 s, no retry, no continuation)
+# saved original RECAP case: integrity + gate rehearsal, no request
+python validation/deepseek-api/verify_original_case.py check
+
+# exactly one real request each (<= 600 s, no retry, no continuation)
 python validation/deepseek-api/verify_planner.py run --timeout 600
+python validation/deepseek-api/verify_original_case.py run --timeout 600
 ```
 
 A live `run` needs `DEEPSEEK_API_KEY` and a model in the repository `.env` (or the
@@ -205,5 +254,13 @@ business acceptance) is started with the acceptance configuration:
 python -m creation_pipeline build validation/deepseek-api/acceptance-input.json
 ```
 
-That command requires the Codex CLI for the native stages, Docker for execution and
-a working `.env`. It was deliberately not started here.
+That configuration reproduces the finalized explicit-script-binding case (source
+set, prompt, execution profile, limits and the binding object verbatim) and adds
+only the DeepSeek provider options. It requires the Codex CLI for the native stages,
+Docker for execution and a working `.env`; it was deliberately not started, because
+neither provider is currently usable (`validation/deepseek-api/launch-check.json`).
+
+One dependency to know before the batch: because the entry is bound explicitly to
+`scripts/terminal_fragments.py`, a fresh creation must author that exact path.
+Otherwise runtime preparation stops deterministically at `binding_unresolved`
+without a model call - the binding is not widened automatically.

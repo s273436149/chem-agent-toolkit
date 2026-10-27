@@ -35,6 +35,14 @@
   },
   "runtime": {
     "rdkit-recap-terminal-fragments": {
+      "binding": {
+        "entry": "scripts/terminal_fragments.py",
+        "association": "explicit",
+        "source_id": "recap",
+        "source_path": "document.py",
+        "quote": ">>> res = Recap.RecapDecompose(m)",
+        "reason": "The delivered terminal-fragment script is a thin wrapper over the source-documented API: it parses SMILES with Chem.MolFromSmiles, calls Recap.RecapDecompose on the molecule and collects root.GetLeaves(), which is exactly the call sequence documented in the pinned Recap.py docstring. The source itself performs no SMILES validation, so the wrapper adds an explicit invalid-input boundary instead of borrowing upstream behaviour."
+      },
       "options": {
         "backend": "deepseek_api",
         "api_model": null,
@@ -58,5 +66,5 @@
       "deepseek-api"
     ]
   },
-  "notes": "Acceptance configuration for this copy. model.backend stays codex_cli: discovery, authoring and independent review keep the Codex CLI transport and are NOT migrated. runtime.<candidate>.options.backend=deepseek_api switches only the structured model_call stages - entry association, runtime planning and contract diagnosis - to the DeepSeek chat completions API. api_model is null on purpose: the DeepSeek model identifier is read from DEEPSEEK_MODEL / .env and is never guessed here, and the Codex model name above is never sent to the API provider. api_retries=0 and api_stream=true keep exactly one request per admitted call; the single request is bounded by model_timeout=600 and the stage by total_seconds=1800. reasoning_effort=medium is requested; DeepSeek maps it to high, which is recorded in the receipt as a compatibility mapping rather than an equivalence. service_tier has no DeepSeek equivalent: it is recorded and never sent."
+  "notes": "Acceptance configuration for this copy. It reproduces the finalized explicit-script-binding case (source set, prompt, execution profile, limits and the binding object copied verbatim from validation/final-acceptance-review/input-batch-4.json) and adds only provider configuration. model.backend stays codex_cli: discovery, authoring and independent review keep the Codex CLI transport and are NOT migrated. runtime.<candidate>.options.backend=deepseek_api switches only the structured model_call stages - entry association, runtime planning and contract diagnosis - to the DeepSeek chat completions API. api_model is null on purpose: the DeepSeek model identifier is read from DEEPSEEK_MODEL / .env and is never guessed, and the Codex model name above is never sent to the API provider. api_retries=0 and api_stream=true keep exactly one request per admitted call; one request is bounded by model_timeout=600 and the stage by total_seconds=1800. reasoning_effort=medium is requested; DeepSeek maps it to high, which is recorded in the receipt as a compatibility mapping rather than an equivalence. service_tier has no DeepSeek equivalent: it is recorded and never sent. Dependency of the restored binding: the authored candidate must deliver scripts/terminal_fragments.py exactly, otherwise runtime preparation stops deterministically at binding_unresolved without a model call; that is a real risk for a fresh creation and is recorded in the migration report."
 }

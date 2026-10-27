@@ -52,6 +52,7 @@ import os
 import re
 import socket
 import ssl
+import threading
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -448,11 +449,104 @@ class _Reader:
         return data
 
 
-def _connection(settings, timeout):
+def _resolve_before(host, port, deadline):
+    """Resolve the model host under the caller's deadline.
+
+    ``socket.getaddrinfo`` is a blocking C call with no timeout argument, so a slow
+    resolver would otherwise sit outside the total budget. It runs in a daemon worker
+    and is abandoned if the deadline expires first: the call fails closed and reports
+    ``model_timeout`` instead of silently overrunning.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ApiTransportError('Total model call deadline expired before DNS resolution',
+                                code='model_timeout')
+    outcome = {}
+
+    def work():
+        try:
+            outcome['addresses'] = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except BaseException as exc:                       # noqa: BLE001 - reported below
+            outcome['error'] = exc
+
+    worker = threading.Thread(target=work, daemon=True, name='deepseek-resolve')
+    worker.start()
+    worker.join(max(0.0, remaining))
+    if worker.is_alive():
+        raise ApiTransportError(
+            'DNS resolution for the model host did not finish inside the total call deadline',
+            code='model_timeout', detail={'phase': 'dns'})
+    if 'error' in outcome:
+        raise outcome['error']
+    addresses = outcome.get('addresses') or []
+    if not addresses:
+        raise OSError('The model host did not resolve to any address')
+    return addresses
+
+
+def _connect_before(host, port, deadline):
+    """Open one TCP connection, resolving and connecting inside the deadline."""
+    addresses = _resolve_before(host, port, deadline)
+    failure = None
+    for family, socktype, protocol, _, sockaddr in addresses:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ApiTransportError('Total model call deadline expired during connection',
+                                    code='model_timeout', detail={'phase': 'connect'})
+        candidate = socket.socket(family, socktype, protocol)
+        try:
+            candidate.settimeout(max(0.05, remaining))
+            candidate.connect(sockaddr)
+            # The TLS handshake runs inside http.client right after this returns, so
+            # re-arm with the budget that is actually left instead of the pre-connect
+            # value.
+            candidate.settimeout(max(0.05, deadline - time.monotonic()))
+            return candidate
+        except OSError as exc:
+            candidate.close()
+            failure = exc
+            if time.monotonic() >= deadline:
+                raise ApiTransportError(
+                    'Total model call deadline expired during connection',
+                    code='model_timeout', detail={'phase': 'connect'}) from exc
+    raise failure or OSError('No usable address for the model host')
+
+
+def _arm(connection, deadline):
+    """Re-derive the socket timeout from the remaining budget before a blocking step.
+
+    This is what keeps connect, send, header wait and stream reads inside one total
+    deadline: each step is bounded by what is actually left, not by a stale timeout.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ApiTransportError(
+            'Total model call deadline expired before the next network step',
+            code='model_timeout')
+    sock = getattr(connection, 'sock', None)
+    if sock is not None:
+        try:
+            sock.settimeout(max(0.05, remaining))
+        except OSError:
+            pass
+    return remaining
+
+
+def _connection(settings, deadline):
+    remaining = max(0.05, deadline - time.monotonic())
     if settings.scheme == 'https':
-        return http.client.HTTPSConnection(settings.host, settings.port, timeout=timeout,
-                                           context=ssl.create_default_context())
-    return http.client.HTTPConnection(settings.host, settings.port, timeout=timeout)
+        connection = http.client.HTTPSConnection(
+            settings.host, settings.port, timeout=remaining,
+            context=ssl.create_default_context())
+    else:
+        connection = http.client.HTTPConnection(settings.host, settings.port, timeout=remaining)
+    # Route name resolution and the TCP connect through the deadline-aware helpers.
+    # The TLS handshake stays inside http.client and inherits the socket timeout that
+    # ``_connect_before`` installed, so it is bounded by the same deadline.
+    connection._create_connection = (
+        lambda address, timeout=None, source_address=None:
+        _connect_before(address[0], address[1], deadline))
+    return connection
 
 
 def _request_id(headers, body_id):
@@ -808,9 +902,10 @@ def call(prompt, schema, model, *, timeout, audit_dir=None, options=None, reason
         connection = None
         response = None
         try:
-            connection = _connection(settings, max(0.1, min(settings.timeout, remaining)))
-            connection.connect()
+            connection = _connection(settings, deadline)
+            connection.connect()                       # DNS + TCP + TLS, all deadline-bounded
             record['connected_seconds'] = round(time.monotonic() - started, 3)
+            _arm(connection, deadline)                 # send is bounded by what is left
             connection.putrequest('POST', settings.path())
             connection.putheader('Content-Type', 'application/json; charset=utf-8')
             connection.putheader('Accept', 'text/event-stream' if settings.stream else 'application/json')
@@ -819,6 +914,7 @@ def call(prompt, schema, model, *, timeout, audit_dir=None, options=None, reason
             connection.endheaders()
             connection.send(payload)
             record['sent_seconds'] = round(time.monotonic() - started, 3)
+            _arm(connection, deadline)                 # header wait is re-derived, not stale
             response = connection.getresponse()
             record['http_status'] = response.status
             headers = response.getheaders()
@@ -875,9 +971,16 @@ def call(prompt, schema, model, *, timeout, audit_dir=None, options=None, reason
             if time.monotonic() >= deadline:
                 break
         except (ssl.SSLError, OSError, http.client.HTTPException, socket.timeout) as exc:
+            # A socket timeout was armed from the remaining budget, so once it fires
+            # the total deadline has expired: that is a deadline verdict, not a plain
+            # connection failure. Anything else stays a transport fault.
+            expired = time.monotonic() >= deadline - 0.01
             last_error = ApiTransportError(
-                'DeepSeek connection failed: ' + type(exc).__name__,
-                code='model_connection_failed', detail={'attempt': attempt + 1})
+                ('Total model call deadline expired during a network step'
+                 if expired else 'DeepSeek connection failed: ' + type(exc).__name__),
+                code='model_timeout' if expired else 'model_connection_failed',
+                detail={'attempt': attempt + 1,
+                        'exception': type(exc).__name__})
             record.update(status='failed', error_class=last_error.code,
                           error=settings.scrub(str(exc))[:500],
                           elapsed_seconds=round(time.monotonic() - started, 3))

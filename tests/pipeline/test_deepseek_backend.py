@@ -539,6 +539,61 @@ class DeadlineAndCancellationTests(DeepSeekCase):
         answer, _ = self.call(timeout=10)
         self.assertEqual(answer['note'], 'slow')
 
+    def test_total_deadline_bounds_a_server_that_never_sends_headers(self):
+        def script(handler):
+            # Accept the request and then stay silent: the client must not wait for
+            # headers beyond the total deadline.
+            time.sleep(10)
+
+        self.server.push(script)
+        connections = self.record_connections()
+        started = time.monotonic()
+        with self.assertRaises(model_call.ModelExecutionError) as caught:
+            self.call(timeout=2)
+        elapsed = time.monotonic() - started
+        self.assertEqual(caught.exception.code, 'model_timeout')
+        self.assertLess(elapsed, 6)
+        self.assertGreaterEqual(elapsed, 1.5)
+        self.assertTrue(connections)
+        self.assertIsNone(connections[0].sock, 'the connection must be released')
+
+    def test_dns_resolution_is_bounded_by_the_total_deadline(self):
+        original = socket.getaddrinfo
+
+        def slow_resolve(host, port, *args, **kwargs):
+            time.sleep(10)
+            return original(host, port, *args, **kwargs)
+
+        started = time.monotonic()
+        with patch.object(socket, 'getaddrinfo', slow_resolve):
+            with self.assertRaises(model_call.ModelExecutionError) as caught:
+                self.call(timeout=1)
+        elapsed = time.monotonic() - started
+        self.assertEqual(caught.exception.code, 'model_timeout')
+        self.assertEqual(caught.exception.detail.get('phase'), 'dns')
+        self.assertLess(elapsed, 5)
+        self.assertEqual(self.server.requests, [], 'no request may be sent')
+
+    def test_every_attempt_shares_one_deadline(self):
+        # Two retries of a silent stream must not double the budget.
+        def silent(handler):
+            handler.send_response(200)
+            handler.send_header('Content-Type', 'text/event-stream')
+            handler.end_headers()
+            time.sleep(10)
+
+        for _ in range(3):
+            self.server.push(silent)
+        started = time.monotonic()
+        with self.assertRaises(model_call.ModelExecutionError) as caught:
+            self.call(timeout=2, options={'retries': 3})
+        elapsed = time.monotonic() - started
+        self.assertIn(caught.exception.code, {'model_timeout', 'model_stream_interrupted'})
+        self.assertLess(elapsed, 8)
+        ledger = self.read('error.json')
+        self.assertGreaterEqual(ledger['request_count'], 1)
+        self.assertLessEqual(elapsed, 2 + 6)
+
     def test_cancellation_propagates_and_releases_the_connection(self):
         self.server.push(sse(frames(json.dumps({'ok': True, 'note': 'c'}))))
         connections = self.record_connections()
