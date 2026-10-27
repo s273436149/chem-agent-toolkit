@@ -72,6 +72,12 @@ plan error, not repaired silently.
   timeout_seconds, relation, forbidden_input_file, capture_stdout and acceptance.
   Anything else (for example stderr_contains, rejection, violates,
   invalid_input_reason) belongs inside acceptance, not at the top level.
+- An acceptance operation selector item is exactly {"index": <int>, "equals":
+  "<literal token>"}; the token must appear character-for-character inside that
+  operation's own source_quote.
+  WRONG: selector:{args:[{index:0, pattern:"^.+$"}]}   (pattern is not a selector key)
+  WRONG: equals:"terminal_fragments" when the quote has no such token (invented)
+  RIGHT: selector:{args:[{index:0, equals:"SMILES"}]} and the quote contains SMILES
 For metamorphic tests use relation={type:equal_stdout|jsonl_concat|numeric_scale,
  runs:[{args:[...],entrypoint:optional string},...], factor:optional number};
 equal_stdout compares all runs; jsonl_concat compares first run with concatenation
@@ -91,6 +97,13 @@ stdout on the host if the tool does not have its own output-file flag.
 Repair responses must include the complete replacement PLAN and a diagnosis in
 reason; retained tests cannot be removed/weakened. Do not relabel failures as
 unsupported unless the actual resource is missing. No host paths or secrets.
+Patch operations are {op: add|replace|remove, path: "/json/pointer", value_json: JSON TEXT}.
+value_json is always a JSON document encoded as a string, so a plain string value
+carries its own quotes. Invalid JSON is an invalid patch, not a semantic rejection.
+  WRONG: {path:"/output_contract", value_json:"stdout"}             (bare word, not JSON)
+  RIGHT: {path:"/output_contract", value_json:""stdout""}
+  WRONG: {path:"/choices", value_json:"[{choice: x}]"}
+  RIGHT: {path:"/choices", value_json:"[{"choice": "x"}]"}
 
 Follow the acceptance_json schema description: grounded v2 contracts, locked before execution.
 INPUT
