@@ -62,11 +62,15 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(config["limits"]["max_builds"], 2)
         self.assertIsNone(config["limits"]["model_calls"])
 
-    def test_api_backends_rejected_at_configuration(self):
+    def test_unknown_api_backends_are_still_rejected_at_configuration(self):
+        # codex_cli (default) and the opt-in deepseek_api are the only supported
+        # native-stage backends; anything else fails before a call is made.
         for backend in ("chat_completions", "ollama"):
             self.raw["model"] = {"backend": backend, "name": "unused"}
-            with self.assertRaisesRegex(ValueError, "Only codex_cli"):
+            with self.assertRaisesRegex(ValueError, "must be codex_cli"):
                 self.load()
+        self.raw["model"] = {"backend": "deepseek_api", "api_model": "deepseek-v4-pro"}
+        self.assertEqual(self.load()["model"]["backend"], "deepseek_api")
 
     def test_api_injection_is_not_a_public_entrypoint(self):
         import inspect

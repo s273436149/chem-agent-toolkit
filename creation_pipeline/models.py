@@ -114,15 +114,11 @@ def load_config(path):
     model = config.get("model", {})
     if isinstance(model, str):
         model = {"name": model}
-    if not isinstance(model, dict) or set(model) - {"backend", "name", "transport", "reasoning_effort", "service_tier"}:
-        raise ValueError("model supports only backend, name, transport, reasoning_effort and service_tier")
-    if model.get("backend", "codex_cli") != "codex_cli":
-        # The native discovery/author/review stages still require the Codex CLI. The
-        # opt-in DeepSeek API backend covers the structured calls only, so it is
-        # selected per candidate instead of rewriting the native Agent transport.
-        raise ValueError("Only codex_cli Agent execution is supported for the native "
-                         "discovery/author/review stages; select the structured DeepSeek "
-                         "backend with runtime.<candidate>.options.backend=deepseek_api")
+    if not isinstance(model, dict) or set(model) - {"backend", "name", "transport", "reasoning_effort", "service_tier", "api_model"}:
+        raise ValueError("model supports only backend, name, transport, reasoning_effort, service_tier and api_model")
+    if model.get("backend", "codex_cli") not in ("codex_cli", "deepseek_api"):
+        raise ValueError("model.backend must be codex_cli (native Codex turns) or deepseek_api "
+                         "(single-shot DeepSeek calls for the native stages); there is no fallback")
     if "name" in model and not isinstance(model["name"], str):
         raise ValueError("model.name must be text")
     if model.setdefault("transport", "default") not in ("default", "https"):
@@ -130,7 +126,10 @@ def load_config(path):
     for key in ("reasoning_effort", "service_tier"):
         if key in model and model[key] is not None and not re.fullmatch(r"[a-z0-9_-]{2,20}", str(model[key])):
             raise ValueError("model." + key + " must be a short lowercase token")
-    model["backend"] = "codex_cli"  # Accept existing native configurations.
+    if model.get("api_model") is not None and (not isinstance(model["api_model"], str)
+                                               or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", model["api_model"])):
+        raise ValueError("model.api_model must be a plain provider model identifier or null")
+    model.setdefault("backend", "codex_cli")
     config["model"] = model
     execution = config.setdefault("execution", {"profile": "production"})
     if not isinstance(execution, dict) or set(execution) - {"profile", "stop_on_runtime_failure", "progress_watch"}:

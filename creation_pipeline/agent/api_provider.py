@@ -1,0 +1,159 @@
+"""Single-shot DeepSeek execution for the native discovery/author/review stages.
+
+The Codex CLI agent loop (tools, workspace helper, resume) is the default and stays
+untouched. This module is the opt-in alternative used when ``model.backend`` is
+``deepseek_api``: the same stage instructions, context and answer schema are sent as
+one bounded chat completion, and the host applies the effects the CLI would have
+applied with tools:
+
+* the discovery and review stages return a plain JSON record;
+* the author stage additionally returns ``files`` (path + UTF-8 content), which the
+  host writes into the run workspace and finalises with the same ``finish`` validation.
+
+Nothing here weakens a contract: the stage schema is still validated locally, and the
+author package still goes through ``delivery.finish``/``validate_package``.
+"""
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+
+from creation_pipeline.records import redact, safe_relative, write_json
+
+# The API provider echoes whole files in the answer, so the bound is larger than a
+# planner patch but still finite; it mirrors the planner's documented output cap.
+MAX_OUTPUT_TOKENS = 96000
+AUTHOR_FILES = {
+    'type': 'array',
+    'items': {'type': 'object', 'additionalProperties': False,
+              'properties': {'path': {'type': 'string'}, 'content': {'type': 'string'}},
+              'required': ['path', 'content']},
+}
+AUTHOR_EXTRA = ('files', 'tests', 'issues', 'notes', 'entry', 'runtime_requirement')
+AUTHOR_INSTRUCTIONS = (
+    '\nAPI PROVIDER MODE. You have no tools and cannot read files: every needed material is '
+    'inline in this prompt. Do not claim to have read anything that is not shown here. '
+    'Return one JSON object that satisfies the schema exactly. Write the complete delivered '
+    'files as files:[{path, content}] with UTF-8 text content; SKILL.md is the only top-level '
+    'file and every other path starts with scripts/, references/, examples/, resources/ or '
+    'assets/. Also return tests, issues, notes and (when you declare one) entry as usual. '
+    'Source quotes you cite must be copied verbatim from the source text below.\n')
+PROVIDER_INSTRUCTIONS = {
+    'discovery': ('\nAPI PROVIDER MODE. You have no tools and cannot read files: the resource '
+                  'workspace and the supplied source texts are inline below. Base every claim on '
+                  'them and do not claim to have inspected anything else. Return one JSON object '
+                  'that satisfies the schema exactly.\n'),
+    'review': ('\nAPI PROVIDER MODE. You have no tools: the delivered files, checks and source '
+               'material are inline below. Judge only what is shown and return one JSON object '
+               'that satisfies the schema exactly.\n'),
+    'author': AUTHOR_INSTRUCTIONS,
+}
+SOURCE_TEXT_BUDGET = 240000
+
+
+def provider(config):
+    return ((config or {}).get('model') or {}).get('backend') or 'codex_cli'
+
+
+def is_api(config):
+    return provider(config) == 'deepseek_api'
+
+
+def author_schema(schema):
+    """The author answer also carries the delivered files when no tools exist."""
+    schema = json.loads(json.dumps(schema))
+    properties = schema.setdefault('properties', {})
+    for name in AUTHOR_EXTRA:
+        properties.setdefault(name, {'type': 'array'} if name in ('files', 'tests', 'issues', 'notes')
+                              else {'type': 'object'} if name == 'entry' else {'type': 'string'})
+    properties['files'] = AUTHOR_FILES
+    required = schema.setdefault('required', [])
+    for name in ('files',):
+        if name not in required:
+            required.append(name)
+    return schema
+
+
+def source_texts(sources, budget=SOURCE_TEXT_BUDGET):
+    """Inline source text for a provider that cannot read files itself.
+
+    Only UTF-8 text is inlined; the budget is enforced per prompt and a file that
+    does not fit is reported as truncated rather than silently dropped.
+    """
+    result, used = [], 0
+    for source in sources or []:
+        root = Path(source['path'])
+        for item in source.get('inventory') or []:
+            path = root if root.is_file() else safe_relative(root, item['path'])
+            entry = {'source_id': source['id'], 'path': item['path'], 'bytes': item.get('bytes'),
+                     'sha256': item.get('sha256')}
+            if used >= budget:
+                result.append(dict(entry, text=None, omitted='source text budget'))
+                continue
+            try:
+                text = path.read_text(encoding='utf-8')
+            except (OSError, UnicodeError):
+                result.append(dict(entry, text=None, omitted='not UTF-8 text'))
+                continue
+            limit = budget - used
+            if len(text) > limit:
+                result.append(dict(entry, text=None, omitted='source text budget'))
+                continue
+            used += len(text)
+            result.append(dict(entry, text=text))
+    return result
+
+
+def materialize(answer, output_directory, metadata_path, metadata_keys=AUTHOR_EXTRA):
+    """Write the author answer's files and metadata where the CLI would have written them.
+
+    Paths are relative, repository-style and confined to the staging directory; a
+    traversal or absolute path aborts the stage instead of being repaired.
+    """
+    staging = Path(output_directory)
+    staging.mkdir(parents=True, exist_ok=True)
+    written = []
+    for item in answer.get('files') or []:
+        if not isinstance(item, dict) or not isinstance(item.get('path'), str):
+            raise ValueError('Author files need a relative path and text content')
+        target = safe_relative(staging, item['path'])
+        content = item.get('content')
+        if not isinstance(content, str):
+            raise ValueError('Author file content must be UTF-8 text: ' + item['path'])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding='utf-8', newline='\n')
+        written.append(item['path'])
+    metadata = {key: answer[key] for key in metadata_keys if key in answer and key != 'files'}
+    write_json(Path(metadata_path), metadata)
+    return written
+
+
+def call(config, prompt, schema, timeout, audit_dir, progress_timeout=None):
+    """One bounded DeepSeek call, returning ``(answer, receipt)`` like the CLI path."""
+    from creation_pipeline.runtime import deepseek_api
+    from creation_pipeline.runtime.model_call import ModelConfigError, ModelExecutionError, ModelOutputInvalid
+    model = (config.get('model') or {}).get('api_model')
+    reasoning = (config.get('model') or {}).get('reasoning_effort')
+    tier = (config.get('model') or {}).get('service_tier')
+    started = time.monotonic()
+    try:
+        answer, receipt = deepseek_api.call(
+            prompt, schema, model, timeout=timeout, audit_dir=audit_dir,
+            options={'retries': 0, 'max_output_tokens': MAX_OUTPUT_TOKENS, 'stream': True},
+            reasoning_effort=reasoning, service_tier=tier,
+            progress_timeout=progress_timeout)
+    except deepseek_api.ApiConfigError as exc:
+        error = ModelConfigError(redact(str(exc)))
+        error.code, error.kind = getattr(exc, 'code', 'model_config_invalid'), 'model_transport'
+        raise error from exc
+    except deepseek_api.ApiOutputInvalid as exc:
+        error = ModelOutputInvalid(redact(str(exc)))
+        error.code, error.kind = getattr(exc, 'code', 'model_output_invalid'), 'model_transport'
+        raise error from exc
+    except deepseek_api.ApiTransportError as exc:
+        error = ModelExecutionError(redact(str(exc)))
+        error.code, error.kind = getattr(exc, 'code', 'model_unavailable'), 'model_transport'
+        raise error from exc
+    receipt = dict(receipt, backend='deepseek_api', elapsed_seconds=round(time.monotonic() - started, 3))
+    return answer, receipt

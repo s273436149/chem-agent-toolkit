@@ -17,7 +17,9 @@
     "name": "gpt-6-astra",
     "transport": "https",
     "reasoning_effort": "medium",
-    "service_tier": "default"
+    "service_tier": "default",
+    "backend": "deepseek_api",
+    "api_model": "deepseek-v4-pro"
   },
   "execution": {
     "profile": "production",
@@ -57,5 +59,5 @@
       "deepseek-api"
     ]
   },
-  "notes": "Run 13+: up to three consecutive fresh rounds, 12 admitted model calls each, 600 s per call, 3600 s per round, api_retries=0, no fallback, no probe outside the budget; blockers are fixed offline between rounds and every round is a new batch (a failed round is never resumed). Entry resolution follows the official flow (caller binding absent -> author declaration -> conservative recognition); native stages keep the Codex CLI (https, medium, default); runtime_defaults route association, planning and diagnosis to the DeepSeek API (deepseek-v4-pro). pin_base_image=true resolves the base reference to a repository digest, renders FROM repo@sha256:... and freezes it. Any Docker build or business acceptance failure stops the round."
+  "notes": "Run 14+: native discovery/author/review run as single-shot DeepSeek calls (model.backend=deepseek_api, api_model=deepseek-v4-pro) because the Codex CLI account is rate-limited; the structured association/planning/diagnosis calls already use the DeepSeek API. Codex remains the default: switching model.backend back to codex_cli restores the native CLI turns with no other change. Up to three fresh rounds, 12 admitted calls each, 600 s per call, 3600 s per round, api_retries=0, no fallback, no probe outside the budget, no restart or resume of a failed round. pin_base_image=true resolves and freezes the base digest. Any Docker build or business acceptance failure stops the round."
 }
