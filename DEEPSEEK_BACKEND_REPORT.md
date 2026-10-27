@@ -18,9 +18,9 @@
 | 结构化输出 | DeepSeek 只有 `response_format=json_object`（无 caller JSON Schema），故**强制本地 jsonschema 校验** |
 | 硬期限 | DNS/连接/TLS/发送/等响应头/流读取/重试**各自按剩余预算重新计算**，共用一个总期限 |
 | 离线测试 | 新增 **54** 个后端用例全通过；完整回归 **386 个测试 OK，3 个跳过**（仅 POSIX 用例） |
-| 在线验证 | **真实请求 0 次**。缺 `DEEPSEEK_API_KEY`，两次验证均 `blocked_config_invalid` |
-| 准确状态 | **适配已实现、离线通过、在线验证未执行**——不能说“换 DeepSeek 有效”，更不能说原超时根因已解决 |
-| 第二阶段完整验收 | **未启动**。Codex CLI 已找到并可在本次进程内使用；仍缺 DeepSeek 凭据/模型名，按规则停止（见 §7） |
+| 在线验证 | **真实请求 1 次**（原案例回放）：HTTP 200、158.5 s、request id `c6842ac2…`，返回 schema 合法的完整计划，但**未通过未改动的验收夹具门禁**（1 个负向用例用了不支持的字段）。 |
+| 准确状态 | **适配器在线可用**（传输、完成标记、本地 schema 均通过），但**计划语义未通过**，因此唯一一批未启动。 |
+| 第二阶段完整验收 | **未启动**。前批门禁未通过即停止（见 §7），0 次构建、0 条业务用例、0 次查询/安装。 |
 
 提交历史（本副本）：
 
@@ -183,20 +183,47 @@ d61362f  fix(model-call): harden the total deadline; restore the explicit bindin
 * 显式 markdown-python binding 与交付包一致（提取区间 + code 哈希）；
 * **该案例历史上被接受的 plan 仍能通过未改动的 `preparation.validate`（8 条用例）**——所以回放结果与历史判定可比。
 
-### 5.3 在线：0 次真实请求
+### 5.3 在线：先 0 请求（缺凭据），后执行 1 次（凭据补齐）
+
+凭据缺失期间两次验证均为：
 
 ```
 status       blocked_config_invalid
 error_class  model_config_invalid
-reason       DEEPSEEK_API_KEY is not configured (process environment or repository .env); no request was sent
+reason       DEEPSEEK_API_KEY is not configured (...); no request was sent
 request_count 0
 ```
 
-记录：`validation/deepseek-api/result.json`、`validation/deepseek-api/result-original-case.json`、`validation/deepseek-api/evidence/blocked-config-invalid/`。
+记录：`validation/deepseek-api/result.json`、`validation/deepseek-api/evidence/blocked-config-invalid/`。
 
-### 5.4 第二阶段完整验收：启动条件检查后停止
+`.env` 补齐（`DEEPSEEK_API_KEY` + `DEEPSEEK_MODEL=deepseek-flash`）后，执行了**唯一一次**原案例回放：
 
-见 §7 与 `validation/deepseek-api/launch-check.json`。**未启动任何批次，0 次模型调用，0 次 Docker 构建。**
+```
+endpoint   https://api.deepseek.com/chat/completions (official)
+model      deepseek-flash
+params     stream=true, response_format=json_object, max_tokens=65536,
+           thinking=enabled, reasoning_effort=high (requested medium)
+requests   1（无重试），HTTP 200，158.5 s
+request_id c6842ac2-7d62-4b7d-a67d-152463ca0179
+```
+
+**通过**：传输、`data: [DONE]` + `finish_reason=stop` 完成判据、以及针对保存的 151,668 B
+`PLAN_SCHEMA` 的本地 schema 校验——模型返回了完整计划（`python:3.11-slim`、`linux/amd64`、
+`script=entry/skill.py`、依赖 `rdkit`、2 个构建步骤、7 条用例、`resource_assessment=unknown`、
+`acceptance_json` 八个键齐全）。
+
+**未通过**：未改动的验收夹具门禁在负向用例 `behavior-reject-empty-smiles` 上拒绝
+
+1. `Unknown fixture fields: stderr_contains`（`check_case` 不支持该字段）；
+2. 仅删除该字段后：`Behavior test requires assertions or explicit test runner`（该用例因此没有断言）。
+
+这是模型的计划语义缺陷，不是适配器或传输问题。证据：
+`validation/deepseek-api/evidence/original-case-live/`。
+该请求独立记账，**不计入**后续批次的 8 次预算；批次本身 0 次调用。
+
+### 5.4 第二阶段完整验收：前批门禁未通过，未启动
+
+见 §7 与 `validation/deepseek-api/launch-check.json`。**未启动批次，0 次 Docker 构建，0 条业务用例，0 次查询/安装。**
 
 ---
 
@@ -233,24 +260,26 @@ python -m creation_pipeline build validation/deepseek-api/acceptance-input.json
 
 | 检查项 | 结果 |
 | --- | --- |
-| 第一阶段提交 | 存在且工作区干净（`58917da` → `43a69ce` → `8d6bc7b` → `d61362f` → `55893da`） |
+| 第一阶段提交 | 存在且工作区干净（`58917da` → `43a69ce` → `8d6bc7b` → `d61362f` → `55893da` → `778917b` → `32378a1`） |
 | 离线回归 | `386 tests OK (skipped=3)` |
-| 小范围真实 planner 验证 | `blocked_config_invalid`，**0 请求**（缺凭据） |
-| 原案例验证 | 离线完整性检查与门禁彩排通过；`run` **未执行**（其前置条件是 DeepSeek 配置齐备，当前不满足） |
-| planner 使用 DeepSeek API | 配置显式 `backend=deepseek_api`；离线测试断言请求打到 API 端点且不含 Codex 模型名 |
+| 小范围真实 planner 验证 | 凭据补齐前为 `blocked_config_invalid`（0 请求）；本轮未重复该脚本 |
+| 原案例验证 | 离线完整性检查与门禁彩排通过；**在线回放执行 1 次**：`plan_rejected`（见 §5.3） |
+| planner 使用 DeepSeek API | 配置显式 `backend=deepseek_api`；本轮真实请求的账本证明规划阶段确实打到 DeepSeek `/chat/completions`，且不含 Codex 模型名 |
 | NativeSession 使用 Codex CLI | 未改动：`review_snapshot`/`stage` 仍走 `codex_command()`，`model.backend` 仍强制 `codex_cli` |
 | Codex CLI 可用性 | **可用**：`C:\Users\27343\.codex\.sandbox-bin\codex.exe`（`codex-cli 0.159.2`）。把它加入**本次进程** PATH 后 `codex_command()` 返回该路径；`isolated_options('https','medium','default')` 生成 40 个参数并隔离两个 MCP 服务；`model_call` 用到的 `--ephemeral/--skip-git-repo-check/--sandbox/--output-schema/--json/--model/-c` 均存在。未改系统配置、未重装。`auth_mode=chatgpt` 且有 tokens，但未用模型调用探测其有效性 |
-| **DeepSeek 凭据** | **缺失**：`.env` 拷贝与工作区根均不存在，环境变量无 `DEEPSEEK_API_KEY`/`DEEPSEEK_MODEL`；`ANTHROPIC_*`（无密钥，模型名为 harness 别名）与 `~/.codex/auth.json`（Codex/OpenAI 认证）**未被当作替代品** |
+| DeepSeek 配置 | **已补齐**：副本 `.env` 内有 `DEEPSEEK_API_KEY`（35 字符）与 `DEEPSEEK_MODEL=deepseek-flash`；endpoint 保持官方默认（无 `DEEPSEEK_BASE_URL` 覆盖）。修复时发现模板行未取消注释且注释里粘有密钥明文，已改为单条 `DEEPSEEK_MODEL=deepseek-flash`，密钥在文件中仅出现 1 处 |
 | Docker | 可用：`29.8.2`，`linux/x86_64` |
 
-结论：**唯一阻断项是 DeepSeek 凭据/模型名未配置**。按“缺少凭据或模型名时停止”的要求，未执行原案例 `run`，未启动唯一一批，0 次模型调用、0 次构建。Codex CLI 的旧阻断（PATH junction 指向不存在的目标）已通过“仅在本次进程 PATH 加入已核实可用的目录”解决，属规则允许范围。`first_blocking_point` 与 `next_step` 写入 `validation/deepseek-api/launch-check.json`。
+结论：**首个阻断点已从“缺凭据”前移到“前批计划语义门禁未通过”**。按“结构与计划语义校验通过后才继续”的要求，唯一一批**未启动**：本轮共 1 次模型调用（仅前批验证，独立记账）、0 次 Docker 构建、0 条业务用例、0 次查询/安装。`first_blocking_point` 与 `next_step` 写入 `validation/deepseek-api/launch-check.json`。
 
 ---
 
 ## 8. 已知限制与剩余风险
 
-1. **在线能力未知**：0 次真实请求，因此“DeepSeek 能否稳定产出符合 `PLAN_SCHEMA` 的完整计划”尚未验证；原超时根因是否改善更无从判断。
-2. **原案例回放的参数不等价**：原始请求是 Codex `gpt-6-astra`（继承 `reasoning_effort=low`，schema 由 CLI 服务端强制），回放是 DeepSeek（`medium→high`，schema 靠本地校验 + system 消息提示）。账本会分别记录，不声称等价。
-3. **显式 binding 对新创建是硬约束**：`scripts/terminal_fragments.py` 必须被作者产出，否则 `binding_unresolved`（确定性阻断、不调用模型）。这是原案例作为“修订批”时的既定条件，搬到“从零创建”需作者正好产出该路径。
-4. **Codex 阶段未迁移**：两种后端的“一次调用”语义不同（CLI 轮次 vs 一次 HTTP 请求），预算账本会同时记录两者，不能直接比较。
-5. **迁移只覆盖结构化调用**，且仅一个新案例通过也不等于性能验证完成或整个版本可合并；未执行 merge/push/发布。
+1. **计划语义尚未通过**：DeepSeek 的**单次**产出结构合法但被未改动的夹具门禁拒绝（1 个负向用例）。生产流程会触发修复轮，本轮因“仅一次请求”无法修复，因此既不能说该案例失败，也不能说它通过。
+2. **原超时案例是否改善仍未知**：本轮只记录了 158.5 s 完成、200、1 次请求；单次请求不能证明原超时根因已解决，也没有做性能对照。
+3. **模型与参数不等价**：原始请求是 Codex `gpt-6-astra`（继承 `reasoning_effort=low`，schema 由 CLI 服务端强制），回放是 DeepSeek `deepseek-flash`（`medium→high`，schema 靠本地校验 + system 消息提示）。账本分别记录，不声称等价。
+4. **显式 binding 对新创建仍是硬约束**：已在 input 中明确要求作者交付 `scripts/terminal_fragments.py`，但尚未在真实创建中验证作者会遵守。
+5. **.env 使用痕迹**：该密钥曾被误粘在 `.env` 的注释行内（也已出现在本会话输出中），若该会话记录可能外传，建议轮换；本轮未在任何报告或证据中输出其值。
+6. **Codex 阶段未迁移**：两种后端的“一次调用”语义不同（CLI 轮次 vs 一次 HTTP 请求），预算账本会同时记录两者，不能直接比较。
+7. **迁移只覆盖结构化调用**，且后续批次尚未通过，不能据此判断性能验证完成或整个版本可合并；未执行 merge/push/发布。

@@ -65,14 +65,36 @@
                               "reasoning_effort", "service_tier", "progress_watch"],
     "changes_beyond_provider_and_binding_alignment": "batch label and notes only"
   },
+  "pre_batch_original_case_run": {
+    "executed": true,
+    "when": "2026-10-27T03:17Z",
+    "requests": 1,
+    "http_status": 200,
+    "elapsed_seconds": 158.536,
+    "request_id": "c6842ac2-7d62-4b7d-a67d-152463ca0179",
+    "model": "deepseek-flash",
+    "endpoint": "https://api.deepseek.com/chat/completions",
+    "parameters_sent": {"stream": true, "response_format": "json_object",
+                        "max_tokens": 65536, "thinking": {"type": "enabled"},
+                        "reasoning_effort": "high", "requested_reasoning_effort": "medium",
+                        "service_tier": "recorded, not sent"},
+    "transport": "passed (documented completion marker, local PLAN_SCHEMA validation)",
+    "answer_action": "plan",
+    "verdict": "plan_rejected",
+    "gate_failure": "Unknown fixture fields: stderr_contains; rejection violates and invalid_input_reason belong inside acceptance",
+    "gate_failure_after_removing_that_field_only": "Behavior test requires assertions or explicit test runner",
+    "evidence": "validation/deepseek-api/evidence/original-case-live/",
+    "counted_in_batch_budget": false
+  },
   "decision": {
     "batch_started": false,
-    "model_calls": 0,
+    "model_calls": 1,
     "docker_builds": 0,
     "business_cases_run": 0,
-    "first_blocking_point": "DeepSeek credential: DEEPSEEK_API_KEY and DEEPSEEK_MODEL are not configured, so the association/planning/diagnosis stages cannot run. The instruction to stop when credentials or model names are missing applies before the batch.",
-    "condition_that_was_checked": "the pre-batch original-case run was allowed only with a complete DeepSeek configuration; it is not complete, so that run was not attempted",
-    "reason_not_partial": "starting with one provider missing would not be a smaller acceptance; it would replace the fixed case with an ad-hoc run and could not produce the required ledger, build identity or business evidence",
-    "next_step": "create a local .env (or environment) with DEEPSEEK_API_KEY and DEEPSEEK_MODEL plus, per the acceptance input, any needed extras; prepend C:\\Users\\27343\\.codex\\.sandbox-bin to PATH in the run process; then run verify_original_case.py run once and, on success, the single batch"
+    "queries_or_installations_run": 0,
+    "first_blocking_point": "the pre-batch plan semantic gate rejected DeepSeek's one-shot plan on one negative case, so the full acceptance batch was not started; the next decision belongs to the operator (allow a repair round inside the batch, or require a conforming fixture in one shot)",
+    "condition_that_was_checked": "the deepseek_api stage ran for real and produced a schema-valid plan; it did not pass the unchanged acceptance-fixture gate",
+    "reason_not_partial": "starting the batch after a failed pre-batch gate would replace the fixed case with an unreviewed retry and could not produce the required evidence",
+    "next_step": "decide whether the negative case should be repaired within the batch (production allows a repair round) or whether the planner must produce a conforming fixture in one shot; either way the batch needs a fresh, owner-approved launch"
   }
 }

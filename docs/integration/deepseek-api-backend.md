@@ -213,16 +213,34 @@ historical verdict instead of being a lookalike.
 
 ### 7.3 Live status
 
-**No real DeepSeek request has been made.** The workspace-root `.env` that this
-migration is supposed to consume (`E:\Users\27343\Docker\.env`) does not exist, so
-both harnesses stop with `blocked_config_invalid` and **0 requests sent**
-(`validation/deepseek-api/result.json`,
-`validation/deepseek-api/result-original-case.json`). No model name was guessed and
-no request was repeated.
+One real request has been made, on the saved original case. With `DEEPSEEK_MODEL`
+`deepseek-flash` and the official endpoint:
 
-The accurate status is therefore: **adapter implemented, offline verified, online
-verification not executed**. It is not yet evidence that routing the planner to
-DeepSeek helps the original timeout case.
+```
+requests   1 (no retry), HTTP 200, 158.5 s
+params     stream=true, response_format=json_object, max_tokens=65536,
+           thinking=enabled, reasoning_effort=high (requested medium)
+request_id c6842ac2-7d62-4b7d-a67d-152463ca0179
+```
+
+Passed: the transport, the documented completion marker (`data: [DONE]` plus a
+terminal `finish_reason`), and the local validation against the saved 151,668 B
+`PLAN_SCHEMA` - the model returned a complete plan.
+
+Rejected: the **unchanged acceptance-fixture gate** refused that plan on the
+negative case `behavior-reject-empty-smiles`, first for an unsupported fixture field
+(`stderr_contains`), then - with only that field removed - because the case then has
+no assertion at all. Evidence: `validation/deepseek-api/evidence/original-case-live/`.
+
+This is a plan-semantics defect of a single one-shot answer, not a transport defect.
+Production would feed the rejection back and spend a repair round; the pre-batch
+check deliberately forbids that, so the verdict is "one-shot answer did not pass the
+gate", not "the case cannot pass". The request is ledgered separately and was not
+charged to the batch budget; the acceptance batch itself was not started.
+
+The remaining unknown is whether routing the planner to DeepSeek helps the original
+timeout case: one request says nothing about that, and no performance comparison was
+made.
 
 ## 8. How to run
 

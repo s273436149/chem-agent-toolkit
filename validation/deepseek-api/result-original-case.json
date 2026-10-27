@@ -1,7 +1,7 @@
 {
   "mode": "run",
   "case": "saved-original-recap-planner-request",
-  "started_at": "20261027T025457Z",
+  "started_at": "20261027T031727Z",
   "timeout_seconds": 600.0,
   "single_request": true,
   "retries": 0,
@@ -22,15 +22,33 @@
     "prompt_chars": 45357,
     "handoff_files": 6
   },
-  "status": "blocked_config_invalid",
-  "error_class": "model_config_invalid",
-  "reason": "DEEPSEEK_API_KEY is not configured (process environment or repository .env); no request was sent",
-  "elapsed_seconds": 0.025,
+  "answer_action": "plan",
+  "status": "plan_rejected",
+  "error_class": null,
+  "reason": "Unknown fixture fields: stderr_contains; rejection violates and invalid_input_reason belong inside acceptance",
+  "elapsed_seconds": 158.536,
   "ledger": {
-    "request_count": 0,
-    "ledgers": []
+    "request_count": 1,
+    "ledgers": [
+      {
+        "path": "runs\\20261027T031727Z\\model-0\\attempts.json",
+        "request_count": 1,
+        "attempts": [
+          {
+            "attempt": 1,
+            "status": "completed",
+            "http_status": 200,
+            "error_class": null,
+            "request_id": {
+              "source": "body:id",
+              "value": "c6842ac2-7d62-4b7d-a67d-152463ca0179"
+            }
+          }
+        ]
+      }
+    ]
   },
-  "request_count": 0,
+  "request_count": 1,
   "redaction": {
     "files_with_redacted_shapes": [],
     "api_key_recorded": false
