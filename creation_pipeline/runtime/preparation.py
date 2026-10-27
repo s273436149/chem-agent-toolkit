@@ -112,11 +112,15 @@ def propose(source, binding, audit, opts, constraints=None, locked=None, feedbac
     deadline = None if opts["total_seconds"] is None else time.monotonic() + opts["total_seconds"]
     attempts = itertools.count() if opts["max_attempts"] is None else range(opts["max_attempts"])
     diagnoses = set()
+    # Cases that came from outside this draft. A repair may withdraw its own
+    # over-promises, but never an accepted or author-supplied case.
+    required = {c["name"] for c in (locked or []) if c.get("origin") == "model_proposed"}
     from .entry import runtime_path
     for number in attempts:
         p, index, _ = planner.plan(source, {"script": runtime_path(binding),
             "constraints": ["Invoke the unchanged delivered package entry, not only the upstream tool."] + (constraints or [])},
-            Path(audit) / str(number), opts, deadline, feedback=feedback, previous=previous, call_guard=call_guard)
+            Path(audit) / str(number), opts, deadline, feedback=feedback, previous=previous, call_guard=call_guard,
+            required=required)
         try:
             cases = validate(p, index, source, binding, opts, locked)
             return p, index, cases

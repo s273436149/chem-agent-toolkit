@@ -239,8 +239,13 @@ _plan['properties']['resource_assessment'] = obj({
 _plan['required'].append('resource_assessment')
 
 
-def patch_plan(base, answer, locked):
-    """Bounded JSON Pointer edits, followed by the unchanged full plan validator."""
+def patch_plan(base, answer, locked, required=None):
+    """Bounded JSON Pointer edits, followed by the unchanged full plan validator.
+
+    ``required`` names the cases that came from outside the model's own draft
+    (accepted/locked cases). A repair may withdraw the model's own over-promises,
+    but those names may not disappear or change.
+    """
     import jsonschema
     try:jsonschema.validate(answer,PATCH_SCHEMA)
     except jsonschema.ValidationError as exc:raise PlanningError('Patch schema error: '+exc.message) from exc
@@ -256,25 +261,18 @@ def patch_plan(base, answer, locked):
             raise PlanningError('Unknown plan field in patch: '+raw)
         if locked and parts[0] in {'tests', 'acceptance_json'}:
             raise PlanningError('Repair cannot patch locked tests')
-        parent=result
         try:
-            for part in parts[:-1]:parent=parent[int(part)] if isinstance(parent,list) else parent[part]
-            key=parts[-1];op=edit['op'];value=None if op == 'remove' else json.loads(edit['value_json'])
+            op=edit['op']
+            value=None if op == 'remove' else json.loads(edit['value_json'])
+            nested = _nested_text_target(parts)
+            if nested is not None:
+                # Editing inside the JSON text is a real edit of that field: decode,
+                # apply the remaining pointer, re-encode. The text itself stays text.
+                _apply_json_text_edit(result, nested[0], nested[1], op, value)
+                continue
             if value is not None:
                 value = _coerce_for_pointer(value, parts)
-            if isinstance(parent,list):
-                if key=='-' and op=='add':parent.append(value);continue
-                if not re.fullmatch(r'0|[1-9][0-9]*',key):raise ValueError('Invalid array index')
-                n=int(key)
-                if not 0 <= n < len(parent)+(op=='add'):raise IndexError('Array index out of bounds')
-                if op=='add':parent.insert(n,value)
-                elif op=='replace':parent[n]=value
-                else:parent.pop(n)
-            elif isinstance(parent,dict):
-                if op!='add' and key not in parent:raise KeyError(key)
-                if op=='remove':del parent[key]
-                else:parent[key]=value
-            else:raise TypeError('Patch parent is not an object/array')
+            _apply_pointer(result, parts, op, value)
         except PlanningError:
             raise
         except (ValueError,KeyError,IndexError,TypeError) as exc:
@@ -287,14 +285,135 @@ def patch_plan(base, answer, locked):
                              "plan": copy.deepcopy(result)}, PLAN_SCHEMA)
     except jsonschema.ValidationError as exc:
         raise PlanningError('Patched plan schema error: ' + str(exc.message)[:300]) from exc
-    if not locked:
+    # External obligations are anchored before any promise is compared, so a repair
+    # can never trade scope it does not own for an easier plan.
+    _require_scope(result, base, required)
+    if locked:
+        # An accepted plan is evidence: it may only grow. Withdrawing an accepted
+        # promise would silently shrink the standard the environment was locked to.
         old_policy = _json_field(base, 'acceptance_json')
         new_policy = _json_field(result, 'acceptance_json')
         if (not set(old_policy.get('purposes', [])) <= set(new_policy.get('purposes', []))
                 or not {o['id'] for o in old_policy.get('operations', [])} <= {o['id'] for o in new_policy.get('operations', [])}
                 or not {t['name'] for t in base.get('tests', [])} <= {t['name'] for t in result.get('tests', [])}):
-            raise PlanningError('Pre-lock repair cannot remove promised purposes, operations or tests')
+            raise PlanningError('Locked repair cannot remove promised purposes, operations or tests')
     return result
+
+
+def _require_scope(result, base, required):
+    """Names that must survive a repair because they were not the model's to drop."""
+    if not required:
+        return
+    by_name = {t.get('name'): t for t in result.get('tests', []) if isinstance(t, dict)}
+    original = {t.get('name'): t for t in base.get('tests', []) if isinstance(t, dict)}
+    # Only promises the draft actually carried are constraints on the draft.
+    guarded = [name for name in required if name in original]
+    missing = sorted(name for name in guarded if name not in by_name)
+    if missing:
+        raise PlanningError('Repair cannot remove required cases: ' + ', '.join(missing))
+    changed = sorted(name for name in guarded
+                     if digest(by_name[name]) != digest(original[name]))
+    if changed:
+        raise PlanningError('Repair cannot change required cases: ' + ', '.join(changed))
+
+
+def scope_delta(base, result):
+    """Promises present in ``base`` and absent in ``result`` (audit, never silent)."""
+    if not isinstance(base, dict) or not isinstance(result, dict):
+        return {}
+    def names(tests):
+        return {t.get('name') for t in tests if isinstance(t, dict) and t.get('name')}
+    def policy(plan):
+        try:
+            return _json_field(plan, 'acceptance_json')
+        except PlanningError:
+            return {}
+    old, new = policy(base), policy(result)
+    def ids(document, key):
+        return {item.get('id') for item in document.get(key, [])
+                if isinstance(item, dict) and item.get('id')}
+    old_checks = ids(old, 'checks')
+    delta = {
+        'tests': sorted(names(base.get('tests', [])) - names(result.get('tests', []))),
+        'purposes': sorted(set(old.get('purposes', [])) - set(new.get('purposes', []))),
+        'operations': sorted(ids(old, 'operations') - ids(new, 'operations')),
+        'checks': sorted(old_checks - ids(new, 'checks')),
+        'selected_checks': sorted(
+            f"{operation.get('id')}/{check}"
+            for operation in old.get('operations', []) if isinstance(operation, dict)
+            for check in set(operation.get('checks', [])) - set(
+                next((o.get('checks', []) for o in new.get('operations', [])
+                      if isinstance(o, dict) and o.get('id') == operation.get('id')), []))),
+    }
+    return {key: value for key, value in delta.items() if value}
+
+
+def _nested_text_target(parts):
+    """Split a pointer that addresses inside a JSON-text field into (field, rest)."""
+    if len(parts) >= 2 and parts[0] == 'acceptance_json':
+        return parts[:1], parts[1:]
+    if len(parts) >= 4 and parts[0] == 'tests' and parts[2] == 'case_json':
+        return parts[:3], parts[3:]
+    return None
+
+
+def _apply_json_text_edit(root, field_parts, rest, op, value):
+    """Apply a pointer inside the JSON document stored in a text plan field."""
+    holder = root
+    for part in field_parts[:-1]:
+        holder = holder[int(part)] if isinstance(holder, list) else holder[part]
+    key = field_parts[-1]
+    if not isinstance(holder, dict) or key not in holder:
+        raise PlanningError('Patch target is absent: ' + _pointer(field_parts))
+    text = holder[key]
+    if not isinstance(text, str):
+        raise PlanningError(_pointer(field_parts) + ' must hold JSON text to address inside it')
+    try:
+        document = json.loads(text)
+    except ValueError as exc:
+        raise PlanningError(_pointer(field_parts) + ' does not hold valid JSON: ' + str(exc)) from exc
+    if not isinstance(document, (dict, list)):
+        raise PlanningError(_pointer(field_parts) + ' is not a JSON object/array')
+    # Encode atomically: the caller only sees the new text when the edit succeeded.
+    working = copy.deepcopy(document)
+    _apply_pointer(working, rest, op, value)
+    holder[key] = json_text(working)
+
+
+def _pointer(parts):
+    return '/' + '/'.join(str(part) for part in parts)
+
+
+def _apply_pointer(container, parts, op, value):
+    """Bounded JSON Pointer add/replace/remove with the array-index rules."""
+    parent = container
+    for part in parts[:-1]:
+        parent = parent[int(part)] if isinstance(parent, list) else parent[part]
+    key = parts[-1]
+    if isinstance(parent, list):
+        if key == '-' and op == 'add':
+            parent.append(value)
+            return
+        if not re.fullmatch(r'0|[1-9][0-9]*', key):
+            raise ValueError('Invalid array index')
+        n = int(key)
+        if not 0 <= n < len(parent) + (op == 'add'):
+            raise IndexError('Array index out of bounds')
+        if op == 'add':
+            parent.insert(n, value)
+        elif op == 'replace':
+            parent[n] = value
+        else:
+            parent.pop(n)
+    elif isinstance(parent, dict):
+        if op != 'add' and key not in parent:
+            raise KeyError(key)
+        if op == 'remove':
+            del parent[key]
+        else:
+            parent[key] = value
+    else:
+        raise TypeError('Patch parent is not an object/array')
 
 
 def _json_field(plan, field):
@@ -392,8 +511,8 @@ empty for a package-installed CLI, or include that exact script in source_files.
 The index omits hashes/repeated lists in this prompt only; full inventory and
 omitted/unread records remain in audit files. Files absent from materials are unread.
 Request only needed installation/entry/test evidence within read_budget. Do not
-claim unread large test vectors were read. An unread-test rejection needs relevant
-material, not removing assertions or inventing expected outputs.
+claim unread large test vectors were read. An unread-test rejection needs the
+relevant material, never invented expected outputs.
 Generated files are installation/config files ONLY; never change source or tests.
 Do not select source Dockerfile or .dockerignore (the renderer owns these). Source
 execution/fixtures.json may be copied unchanged; generated runner cases live at
@@ -406,24 +525,27 @@ For each resource, required_for_execution describes necessity for the selected
 entrypoint and supported input contract. An optional upstream predictor, training
 weight or service outside this entrypoint's scope may be unavailable without
 blocking execution; keep available=false and explain the scope with source
-evidence. Unknown necessity remains required with an unresolved question. Never
-mark an actually needed resource optional to pass validation.
+evidence. Never mark an actually needed resource optional to pass validation.
+resource_assessment states whether the requirement is known: status=complete needs
+source_path and source_quote quoting the read source; status=unknown needs no
+quotation but must name what is undetermined in unresolved. unknown blocks Docker
+execution, so it is the honest answer, never a shortcut past validation.
 Actively propose environment probes, interface cases and behavior tests. Try
 original tests/examples, independently derived tiny cases, justified metamorphic
 relations, or independent comparisons. Every oracle needs its source, derivation,
 tolerance and limitations. Existing fixtures are preserved by the executor.
 Never use output of the program under test as its own correctness oracle. Such
 values are regression baselines only. Guessed values are candidates, not supported
-oracles; agreement of another model is not independent evidence. Preserve original
-expectations on repair; fix environment/entrypoint/config, never tool source.
+oracles; agreement of another model is not independent evidence.
 case_json is a JSON object with args (string array), optional entrypoint (single
 executable overriding container ENTRYPOINT), expected_exit (integer), and optional
 stdout_equals (trimmed string), stdout_contains (strings), expected_json_lines
 (JSONL list), input_files (relative path -> content), output_file (relative under
 /output), timeout_seconds (1..test_seconds from execution_budget). Numeric JSON comparisons use tolerance.
-output_file means the TOOL must create that file, unless capture_stdout=true is
-explicitly set; that mode makes the runner persist stdout after container exit.
-For stdout-only tools use capture_stdout=true rather than inventing an output flag.
+output_file means the TOOL must create that file, unless capture_stdout is the JSON
+boolean true, which requires an explicit output_file and makes the runner persist
+stdout after container exit; use it for a stdout-only tool instead of inventing an
+output flag.
 /output is mounted only for cases declaring output_file. Environment probes must
 not assume this optional mount exists without requesting/creating a result file.
 Fixture contract rules. The validators are exact; a near miss is rejected as a plan
@@ -434,11 +556,9 @@ error, not repaired silently. Executable examples of each rule follow this polic
   least one of them inside case_json, or set case_json.entrypoint to an explicit
   test runner string; kind=candidate and kind=regression can never be a supported
   behavior oracle.
-- capture_stdout appears only together with output_file and must be a JSON boolean.
-- The allowed case_json keys are exactly args, entrypoint, expected_exit,
-  stdout_equals, stdout_contains, expected_json_lines, input_files, output_file,
-  timeout_seconds, relation, forbidden_input_file, capture_stdout and acceptance.
-  Anything else (for example stderr_contains, rejection, violates,
+- case_json takes no undeclared keys: the fields described in this policy (the case
+  fields above, relation, forbidden_input_file, capture_stdout and acceptance) are the
+  whole allowed set. Anything else (for example stderr_contains, rejection, violates,
   invalid_input_reason) belongs inside acceptance, not at the top level.
 - An acceptance operation selector item is exactly {index, equals}; equals is a
   literal token that must appear character-for-character inside that operation's own
@@ -461,10 +581,12 @@ directly with real input, not only help/version or independent checker code.
 For file tools that direct case needs input_files. The portable runner can save
 stdout on the host if the tool does not have its own output-file flag.
 When the answer is a full plan, a repair must still return the complete plan plus a
-diagnosis in reason; retained tests cannot be removed/weakened. When the request
-carries PATCH PROTOCOL, return patch operations as that protocol says instead of a
-second full plan. Do not relabel failures as unsupported unless the actual resource
-is missing. No host paths or secrets.
+diagnosis in reason. When the request carries PATCH PROTOCOL, return patch operations
+as that protocol says instead of a second full plan. A repair fixes environment,
+entrypoint or configuration: it may withdraw a promise this draft itself over-made,
+but never an upstream expectation, an accepted case, or scope the draft did not own.
+Do not relabel failures as unsupported unless the actual resource is missing. No host
+paths or secrets.
 Patch operations are {op: add|replace|remove, path: "/json/pointer", value_json: JSON TEXT}.
 value_json is always a JSON document encoded as a string. For the two JSON-text plan
 fields (acceptance_json and tests[].case_json) the validator accepts either the
@@ -594,7 +716,7 @@ POLICY += '\n' + '\n'.join([
 ]) + '\n'
 
 
-def plan(source, config, audit, opts, deadline, feedback=None, previous=None, call_guard=None):
+def plan(source, config, audit, opts, deadline, feedback=None, previous=None, call_guard=None, required=None):
     """Persist every prompt/response; demand-read additional files within budget."""
     audit = Path(audit)
     if not isinstance(config.get("constraints", []), list) or not all(isinstance(c, str) for c in config.get("constraints", [])):
@@ -661,7 +783,8 @@ def plan(source, config, audit, opts, deadline, feedback=None, previous=None, ca
         policy=POLICY
         if base is not None:
             policy+='\nPATCH PROTOCOL: Return action=read with operations=[] or action=patch with JSON Pointer operations (add/replace/remove; value_json is JSON text). Return only needed edits to previous_plan, not a full replacement. '
-            policy+=('All existing tests are LOCKED: never edit /tests or lower any standard.' if previous is not None else 'This is a rejected candidate, not accepted evidence; fix the reported structural/material issue, preserving original upstream tests and expectations.')
+            policy+='A pointer may continue inside a JSON-text field: /acceptance_json/<pointer> edits the decoded policy and /tests/<index>/case_json/<pointer> edits one decoded fixture, so a single check or expectation is fixed without re-sending the whole document. '
+            policy+=('All existing tests are LOCKED: never edit /tests or lower any standard.' if previous is not None else 'This is a rejected candidate, not accepted evidence; fix the reported structural/material issue, preserving original upstream tests and expectations. A test, purpose or check the candidate itself over-promised may be withdrawn instead of stretching it, but requirements that did not come from this draft must stay.')
         prompt = policy + "\nINPUT\n" + json.dumps(material, ensure_ascii=False)
         if opts["context_chars"] is not None and len(prompt) > opts["context_chars"] * 4:
             raise BudgetExceeded("Total prompt budget exceeded (materials/index/repair context); narrow source root")
@@ -696,7 +819,7 @@ def plan(source, config, audit, opts, deadline, feedback=None, previous=None, ca
         if answer.get('action')=='patch':
             if base is None:raise PlanningError('Patch has no planning base')
             try:
-                proposed=patch_plan(base,answer,previous is not None)
+                proposed=patch_plan(base,answer,previous is not None,required)
             except PlanningError as exc:
                 diagnostic = str(exc)
                 write(audit / f'patch-rejection-{number}.json', {'diagnostic': diagnostic, 'proposal': answer})
@@ -706,7 +829,23 @@ def plan(source, config, audit, opts, deadline, feedback=None, previous=None, ca
                 feedback = dict(feedback or {}, patch_error=diagnostic,
                     patch_rule='Fix the exact JSON Pointer/schema error only. Original base and locked tests remain unchanged.')
                 continue
-        elif answer.get('action')=='plan':proposed=answer['plan']
+            delta = scope_delta(base, proposed)
+            if delta:
+                # A withdrawn promise is legal for a rejected draft but must never be
+                # silent: it is recorded next to the patch that produced it.
+                write(audit / f'scope-delta-{number}.json',
+                      {'base_kind': 'accepted_plan' if previous is not None else 'rejected_candidate',
+                       'withdrawn': delta, 'proposal': sanitized(answer)})
+        elif answer.get('action')=='plan':
+            proposed=answer['plan']
+            if base is not None:
+                # A full replacement is held to the same scope rule as a patch.
+                _require_scope(proposed, base, required)
+                delta = scope_delta(base, proposed)
+                if delta:
+                    write(audit / f'scope-delta-{number}.json',
+                          {'base_kind': 'accepted_plan' if previous is not None else 'rejected_candidate',
+                           'withdrawn': delta, 'proposal': sanitized(answer)})
         else:proposed=None
         if proposed is not None:
             write(audit / "environment_plan.json", sanitized(proposed))
@@ -796,8 +935,18 @@ def validate_plan(p, index, source, previous_cases=None):
     if p["platform"] != "linux/amd64":
         raise PlanningError("Only Linux amd64 CPU is supported")
     from .acceptance import grounded
-    if not grounded(p['resource_assessment'], index, source):
-        raise PlanningError('Resource assessment needs an exact read-source citation; use unknown for undetermined needs')
+    assessment = p['resource_assessment']
+    if assessment.get('status') == 'unknown':
+        # An undetermined requirement is stated honestly instead of being dressed up
+        # with a quotation: the reason lives in the plan's own unresolved list, and
+        # Docker execution stays blocked until the assessment becomes complete.
+        if not [item for item in p['unresolved'] if str(item).strip()]:
+            raise PlanningError('status=unknown must state the undetermined resource requirement '
+                                'in unresolved; it blocks Docker execution until it becomes complete')
+    elif not grounded(assessment, index, source):
+        raise PlanningError('status=complete needs an exact quotation from a read source; '
+                            'when the requirement genuinely cannot be determined, use '
+                            'status=unknown with a concrete unresolved reason instead')
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/@:+-]*", p["base_image"]):
         raise PlanningError("Invalid base image reference")
     # Exec-form ENTRYPOINT is JSON, not a shell/Dockerfile interpolation. Python

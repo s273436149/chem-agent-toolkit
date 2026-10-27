@@ -88,9 +88,29 @@ result.json。因此程序可直接证明前两个内部矛盾，不能跨文件
 | runtime-resume / runtime-prepare | 持久恢复、锁、镜像核验 | 复用自动诊断；仅运行阶段，不启动发现或作者。options-only prepare 只在需要诊断时走此分支 |
 | store.adopt / history / commit | 统一资格、双区及事务 | 增加 runtime_diagnosis 持久引用与历史迁移，不另写晋升；来源确诊内容失败撤销内容资格 |
 | planner.patch_plan / plan | 已有环境补丁协议 | remove 不解析无意义 value_json；具体指针错误反馈原规划循环，重复同错误停止；不擅自修指针 |
+| planner.patch_plan（本轮更新） | JSON 文本字段只能整段替换；被拒草稿的修复连自身过度承诺也不能撤回 | 见下方「补丁协议更新」：嵌套指针、外部范围锚定、unknown 的诚实表达 |
 
 正常 build 中尚未冻结的内部矛盾仍经原 propose 校验反馈修正；已冻结契约只能走
 版本化独立审阅。新校验不是业务执行，也不证明任一断言符合来源。
+
+## 补丁协议更新（仅离线改动，本轮 0 次真实模型调用）
+
+1. **嵌套指针**：`/acceptance_json/<pointer>` 和 `/tests/<i>/case_json/<pointer>` 先解码该
+   JSON 文本字段、在内部应用后续指针、再重新编码回文本。改一条 check、一个 selector
+   或一个 fixture 断言不再需要重发整段文档。锁定计划仍整体禁止触碰 `/tests` 与
+   `/acceptance_json`；一次补丁仍是全有或全无（失败不产生部分结果，输入计划不被就地修改）。
+2. **撤回范围（带范围保护）**：锁定修复只能增长，不得删除已接受的用途/操作/用例；
+   被拒绝草稿的修复可以撤回**该草稿自己**过度承诺的用例、用途、检查或 selector，
+   但外部范围锚定不受影响：调用方提供的必需用例名（`required`）、已接受用例内容、
+   上游 fixture 与配置/作者检查都不能被删除或改写，全量重写与补丁走同一检查。
+   每次真实撤回写入 `planning/<n>/scope-delta-<k>.json`（含撤回项与被拒提案），
+   缩范围可见、不静默。
+3. **资源评估的诚实表达**：`status=unknown` 不再要求引用（那会逼模型编造证据），
+   但必须在 `unresolved` 写明未定项；执行策略不变，`local.py` 的 `resources_unknown`
+   仍阻止 Docker 执行。`status=complete` 仍要求读源精确引用。
+
+这三项都只改变规划协议与报错表达，没有放宽任何验收门禁；补丁后仍要过完整
+`PLAN_SCHEMA` 校验和原有 `validate_plan` 语义门禁。
 
 ## 自动修正边界
 
