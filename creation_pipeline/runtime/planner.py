@@ -260,6 +260,8 @@ def patch_plan(base, answer, locked):
         try:
             for part in parts[:-1]:parent=parent[int(part)] if isinstance(parent,list) else parent[part]
             key=parts[-1];op=edit['op'];value=None if op == 'remove' else json.loads(edit['value_json'])
+            if value is not None:
+                value = _coerce_for_pointer(value, parts)
             if isinstance(parent,list):
                 if key=='-' and op=='add':parent.append(value);continue
                 if not re.fullmatch(r'0|[1-9][0-9]*',key):raise ValueError('Invalid array index')
@@ -273,11 +275,13 @@ def patch_plan(base, answer, locked):
                 if op=='remove':del parent[key]
                 else:parent[key]=value
             else:raise TypeError('Patch parent is not an object/array')
+        except PlanningError:
+            raise
         except (ValueError,KeyError,IndexError,TypeError) as exc:
             raise PlanningError('Invalid plan patch '+raw+': '+str(exc)) from exc
-    # The unchanged plan schema still applies. A patch that writes a structured
-    # value into a text-typed field (acceptance_json, case_json, ...) is an invalid
-    # patch and must become a repair round, not an unhandled TypeError downstream.
+    # The unchanged plan schema still applies. Values for the JSON-text fields have
+    # already been encoded by _coerce_for_pointer; every other field keeps its strict
+    # type, so a structured value there is still an invalid patch.
     try:
         jsonschema.validate({"action": "plan", "requested_files": [], "reason": "",
                              "plan": copy.deepcopy(result)}, PLAN_SCHEMA)
@@ -303,6 +307,59 @@ def _json_field(plan, field):
         return json.loads(value)
     except ValueError as exc:
         raise PlanningError('Plan field %s is not valid JSON: %s' % (field, exc)) from exc
+
+
+# The plan fields whose schema type is JSON text. Nothing else is coerced: a wrong
+# type elsewhere must stay an invalid patch.
+JSON_TEXT_FIELDS = ('acceptance_json', 'case_json')
+
+
+def _as_json_text(value, field):
+    """Return the JSON text for a text-typed plan field.
+
+    A string is kept when it already holds JSON; an object or array is encoded. The
+    value still has to satisfy the plan schema and the semantic gate afterwards, so
+    this normalizes encoding only, never content.
+    """
+    if isinstance(value, str):
+        try:
+            json.loads(value)
+        except ValueError as exc:
+            raise PlanningError('%s must hold JSON text; the supplied text is not JSON: %s'
+                                % (field, exc)) from exc
+        return value
+    if isinstance(value, (dict, list)):
+        return json_text(value)
+    raise PlanningError('%s must be JSON text or a JSON object/array, got %s'
+                        % (field, type(value).__name__))
+
+
+def _coerce_test(value):
+    if not isinstance(value, dict):
+        raise PlanningError('A plan test must be an object, got %s' % type(value).__name__)
+    if 'case_json' not in value:
+        return value
+    return dict(value, case_json=_as_json_text(value['case_json'], 'tests[].case_json'))
+
+
+def _coerce_tests(value):
+    if not isinstance(value, list):
+        raise PlanningError('/tests must be an array, got %s' % type(value).__name__)
+    return [_coerce_test(item) for item in value]
+
+
+def _coerce_for_pointer(value, parts):
+    """Encode a value for the JSON-text fields a pointer targets; other fields as-is."""
+    if len(parts) == 1 and parts[0] in JSON_TEXT_FIELDS:
+        return _as_json_text(value, parts[0])
+    if parts and parts[0] == 'tests':
+        if len(parts) == 1:
+            return _coerce_tests(value)
+        if len(parts) == 2:
+            return _coerce_test(value)
+        if len(parts) == 3 and parts[2] == 'case_json':
+            return _as_json_text(value, 'tests[].case_json')
+    return value
 
 
 def material_priority(path, hint=None):
@@ -409,10 +466,13 @@ carries PATCH PROTOCOL, return patch operations as that protocol says instead of
 second full plan. Do not relabel failures as unsupported unless the actual resource
 is missing. No host paths or secrets.
 Patch operations are {op: add|replace|remove, path: "/json/pointer", value_json: JSON TEXT}.
-value_json is always a JSON document encoded as a string, so a plain string value
-carries its own quotes, and a JSON-text field (acceptance_json, tests[].case_json)
-needs that text encoded once more. Invalid JSON is an invalid patch, not a semantic
-rejection. Executable examples follow this policy.
+value_json is always a JSON document encoded as a string. For the two JSON-text plan
+fields (acceptance_json and tests[].case_json) the validator accepts either the
+object/array itself or that object encoded once more as text, and stores JSON text
+either way; the object form is simpler and preferred, and replacing the whole /tests
+array follows the same rule. Every other plan field keeps its strict type. Invalid
+JSON is an invalid patch, not a semantic rejection. Executable examples follow this
+policy.
 """
 
 ACCEPTANCE_SPEC = """Acceptance v2: acceptance_json is a JSON object with invalid_input (required or
@@ -502,6 +562,8 @@ FIXTURE_EXAMPLES = {
     'patch_bare_word': {'op': 'replace', 'path': '/output_contract', 'value_json': 'stdout'},
     'patch_text_value': {'op': 'replace', 'path': '/output_contract',
                          'value_json': json_text('stdout')},
+    'patch_case_object': {'op': 'replace', 'path': '/tests/0/case_json',
+                          'value_json': json_text(CASE_PAYLOAD)},
     'patch_case_text': {'op': 'replace', 'path': '/tests/0/case_json',
                         'value_json': json_text(json_text(CASE_PAYLOAD))},
 }
@@ -523,10 +585,12 @@ POLICY += '\n' + '\n'.join([
     '- an operation selector item is exactly {index, equals} with a literal token:',
     '  WRONG: ' + json_text(_E['selector_regex']),
     '  RIGHT: ' + json_text(_E['selector_literal']),
-    '- patch value_json is JSON text; a JSON-text field needs one more encoding:',
+    '- patch value_json is JSON text; a JSON-text field accepts the object form',
+    '  (preferred) or the same object encoded once more as text:',
     '  WRONG: ' + json_text(_E['patch_bare_word']),
     '  RIGHT: ' + json_text(_E['patch_text_value']),
-    '  RIGHT for a JSON-text field: ' + json_text(_E['patch_case_text']),
+    '  RIGHT for a JSON-text field, object form: ' + json_text(_E['patch_case_object']),
+    '  RIGHT for the same field, double-encoded text: ' + json_text(_E['patch_case_text']),
 ]) + '\n'
 
 

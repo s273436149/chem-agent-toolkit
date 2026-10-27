@@ -91,10 +91,13 @@ carries PATCH PROTOCOL, return patch operations as that protocol says instead of
 second full plan. Do not relabel failures as unsupported unless the actual resource
 is missing. No host paths or secrets.
 Patch operations are {op: add|replace|remove, path: "/json/pointer", value_json: JSON TEXT}.
-value_json is always a JSON document encoded as a string, so a plain string value
-carries its own quotes, and a JSON-text field (acceptance_json, tests[].case_json)
-needs that text encoded once more. Invalid JSON is an invalid patch, not a semantic
-rejection. Executable examples follow this policy.
+value_json is always a JSON document encoded as a string. For the two JSON-text plan
+fields (acceptance_json and tests[].case_json) the validator accepts either the
+object/array itself or that object encoded once more as text, and stores JSON text
+either way; the object form is simpler and preferred, and replacing the whole /tests
+array follows the same rule. Every other plan field keeps its strict type. Invalid
+JSON is an invalid patch, not a semantic rejection. Executable examples follow this
+policy.
 
 Follow the acceptance_json schema description: grounded v2 contracts, locked before execution.
 Fixture contract examples. Every line below is JSON text exactly as it must be
@@ -112,10 +115,12 @@ written; the rule it belongs to is the rule named in the policy above.
 - an operation selector item is exactly {index, equals} with a literal token:
   WRONG: {"args": [{"index": 0, "pattern": "^.+$"}]}
   RIGHT: {"args": [{"index": 0, "equals": "SMILES"}]}
-- patch value_json is JSON text; a JSON-text field needs one more encoding:
+- patch value_json is JSON text; a JSON-text field accepts the object form
+  (preferred) or the same object encoded once more as text:
   WRONG: {"op": "replace", "path": "/output_contract", "value_json": "stdout"}
   RIGHT: {"op": "replace", "path": "/output_contract", "value_json": "\"stdout\""}
-  RIGHT for a JSON-text field: {"op": "replace", "path": "/tests/0/case_json", "value_json": "\"{\\\"args\\\": [\\\"CCCOCCC\\\"], \\\"stdout_equals\\\": \\\"[]\\\"}\""}
+  RIGHT for a JSON-text field, object form: {"op": "replace", "path": "/tests/0/case_json", "value_json": "{\"args\": [\"CCCOCCC\"], \"stdout_equals\": \"[]\"}"}
+  RIGHT for the same field, double-encoded text: {"op": "replace", "path": "/tests/0/case_json", "value_json": "\"{\\\"args\\\": [\\\"CCCOCCC\\\"], \\\"stdout_equals\\\": \\\"[]\\\"}\""}
 
 INPUT
 {"index": {"files": {"package/README.md": {"size": 293}, "package/tool.py": {"size": 459}, "sources/tool/README.md": {"size": 461}, "sources/tool/tool.py": {"size": 459}}, "material_counts": {"source": 2, "dependencies": 0, "installation_docs": 2, "tests_examples": 0, "dockerfile": 0}, "missing_materials": ["dependencies", "tests_examples", "dockerfile"]}, "materials": {"package/tool.py": "\"\"\"Delivered entry: count non-empty records in a newline-delimited text file.\"\"\"\nimport json\nimport sys\n\n\ndef count(path):\n    with open(path, encoding=\"utf-8\") as handle:\n        return sum(1 for line in handle if line.strip())\n\n\ndef main(argv=None):\n    argv = list(sys.argv[1:] if argv is None else argv)\n    target = argv[0] if argv else \"input.txt\"\n    print(json.dumps({\"path\": target, \"records\": count(target)}))\n\n\nif __name__ == \"__main__\":\n    main()", "package/README.md": "# record-count\n\nDelivered entry: `tool.py`.\n\nUsage:\n\n```sh\npython tool.py DATA.txt\n```\n\nPrints one JSON object with `path` and the number of non-empty lines\n(`records`). Standard library only; requires Python 3.9 or newer.\nExit status is 0 on success and non-zero when the file cannot be read.", "sources/tool/README.md": "# record-count (upstream source)\n\n`count(path)` returns the number of non-empty lines in a UTF-8 text file.\nLines that are empty or contain only whitespace are not counted.\n\nThe command line wrapper prints exactly one JSON object:\n\n    {\"path\": \"<argument>\", \"records\": <integer>}\n\nThe tool has no third-party dependencies and reads no network resources.\nIt never modifies its input file.\n\nSupported interpreters: Python 3.9 and newer (uses only `json`, `sys`).", "sources/tool/tool.py": "\"\"\"Delivered entry: count non-empty records in a newline-delimited text file.\"\"\"\nimport json\nimport sys\n\n\ndef count(path):\n    with open(path, encoding=\"utf-8\") as handle:\n        return sum(1 for line in handle if line.strip())\n\n\ndef main(argv=None):\n    argv = list(sys.argv[1:] if argv is None else argv)\n    target = argv[0] if argv else \"input.txt\"\n    print(json.dumps({\"path\": target, \"records\": count(target)}))\n\n\nif __name__ == \"__main__\":\n    main()"}, "not_read_count": 0, "omissions": {}, "omission_counts": {}, "read_budget": {"used_chars": 1672, "max_chars": null}, "entry_hint": "package/tool.py", "user_constraints": ["Invoke the unchanged delivered package entry, not only the upstream tool.", "The delivered tool has no third-party dependency; keep the image minimal."], "execution_budget": {"test_seconds": 60, "document_seconds": 180, "total_seconds": 600}, "previous_plan": null, "base_kind": "none", "diagnostic": {}, "read_rounds_remaining": 0}

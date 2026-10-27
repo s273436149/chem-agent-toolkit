@@ -136,27 +136,37 @@ class DiagnosisTests(unittest.TestCase):
             with self.assertRaises(PlanningError):
                 patch_plan(p, bad, True)
 
-    def test_patch_that_writes_structured_json_into_a_text_field_is_a_clean_repair(self):
-        """A patch may not replace JSON-text fields with decoded objects.
+    def test_patch_structured_value_for_a_json_text_field_is_encoded(self):
+        """JSON-text plan fields accept the object form; other fields stay strict.
 
-        Before this guard the post-patch policy check called json.loads() on the
-        object and the TypeError escaped the whole build instead of asking for a
-        repair.
+        Before this guard an object written into acceptance_json reached json.loads()
+        as a dict and the TypeError escaped the whole build instead of asking for a
+        repair. The value is now encoded, and a wrong type elsewhere is still an
+        invalid patch.
         """
-        from creation_pipeline.runtime.planner import patch_plan, PlanningError
+        from creation_pipeline.runtime import planner
         from tests.pipeline.test_runtime_build import plan
         base = plan()
-        for path in ('/acceptance_json', '/tests/0/case_json'):
+        policy = dict(json.loads(base['acceptance_json']), note='example')
+        for path, payload in (('/acceptance_json', policy),
+                              ('/tests/0/case_json', {'args': ['x']})):
             answer = {'action': 'patch', 'requested_files': [], 'reason': 'structured',
                       'operations': [{'op': 'replace', 'path': path,
-                                      'value_json': '{"purposes": ["computation"]}'}]}
-            with self.assertRaises(PlanningError, msg=path) as caught:
-                patch_plan(base, answer, False)
-            self.assertIn('is not of type', str(caught.exception))
+                                      'value_json': json.dumps(payload)}]}
+            applied = planner.patch_plan(base, answer, False)
+            stored = (applied['acceptance_json'] if path == '/acceptance_json'
+                      else applied['tests'][0]['case_json'])
+            self.assertIsInstance(stored, str, path)
+            self.assertEqual(json.loads(stored), payload)
+        with self.assertRaises(planner.PlanningError) as caught:
+            planner.patch_plan(base, {'action': 'patch', 'requested_files': [], 'reason': 'bad type',
+                                      'operations': [{'op': 'replace', 'path': '/output_contract',
+                                                      'value_json': '{"a": 1}'}]}, False)
+        self.assertIn('is not of type', str(caught.exception))
         text = {'action': 'patch', 'requested_files': [], 'reason': 'text',
                 'operations': [{'op': 'replace', 'path': '/output_contract',
                                 'value_json': '"stdout"'}]}
-        self.assertEqual(patch_plan(base, text, False)['output_contract'], 'stdout')
+        self.assertEqual(planner.patch_plan(base, text, False)['output_contract'], 'stdout')
 
     def test_patch_feedback_is_specific_and_repeated_error_stops(self):
         from creation_pipeline.runtime import planner
