@@ -8,6 +8,12 @@ documentation examples, or more than one script; without a declaration such a pa
 is refused as ambiguous instead of being guessed. The host validates the declaration
 against the actual package and still requires the source association and the
 independent review; the declaration is never evidence by itself.
+The executable entry must be unambiguous. Either ship exactly one runnable script
+under scripts/ (declare it), or keep exactly ONE complete, unindented ```python fenced
+block in SKILL.md. Any additional illustrative snippet must use a non-python fence
+(for example ```text) or live in references/; two or more python fences without an
+entry declaration are refused, and an interactive prompt (>>>) or an indented fence is
+not executable.
 Record metadata.runtime_requirement with status required/not_required/unknown, a reason,
 and citations [{source_id,path,quote}] quoting the registered original source exactly.
 Use not_required only for an explicitly supported non-executable capability, never
