@@ -1,181 +1,157 @@
-# 最终验收报告（本轮真实实验）
+# 最终验收报告（真实实验 · 第二次运行，使用完整 Codex CLI）
 
-日期：2026-10-27　副本：`E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi`
-结论：**本次副本首版验收未通过 —— 阻塞于环境缺陷（Codex CLI 安装不完整），不是 DeepSeek 适配或管线代码缺陷。** 真实实验在"发现"阶段终止，未进入编写、审阅、关联、规划、构建与业务验收。
+日期：2026-10-27
+副本：`E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi`
+运行目录：`E:\Users\27343\Docker\acceptance-deepseek-run2-20261027`（`state/` + `library/`，全新隔离）
 
-> 审查与结论由**当前执行代理**完成，并非独立模型复核；下文对每条结论标注了依据。
+## 结论
+
+**未通过（部分完成）。** 前五个阶段真实通过——来源准备、发现、编写、独立审阅、**入口关联（DeepSeek）**——然后在**环境规划**阶段，DeepSeek 的流式响应在 52.5 秒时被连接错误打断，规划未产出，后续 Docker 构建、业务验收、catalog 晋升、安装与安装后使用全部 `not_run`。
+
+按停止规则：不重试、不续批、不恢复、不切换提供方（`api_retries=0` 未被违反）。预算使用 **6 / 8** 次应用层调用，墙钟约 **11 分钟 / 3600 秒**。
+
+> 审查与判定由**当前执行代理**完成，非独立模型复核。
 
 ---
 
-## 1. 基线、提交与工作区
+## 1. 基线与提交
 
 | 项 | 值 |
 | --- | --- |
-| 副本 HEAD（实验时） | `84e925310c82917888a4d4322ff783f0ddaf0299` |
-| 本轮新增提交 | 见 §9（`runtime_defaults` + 新 input + 证据 + 本报告） |
-| 工作区 | 干净（提交前 `git status --porcelain` 为空） |
-| 源目录（只读） | `78003de47c8bee93c705cd3a2098ee1f90646aae`，`git status` 为空，未被修改 |
-| 分支 | `integration/deepseek-api-backend`（独立历史；未 merge/push/发布） |
+| 副本 HEAD（运行时代码） | `eb90c4d`（本轮证据与本报告随后提交） |
+| 工作区 | 运行前干净 |
+| 源目录（只读） | `78003de47c8bee93c705cd3a2098ee1f90646aae`，未修改 |
+| 分支 | `integration/deepseek-api-backend`；未 merge / push / 发布 |
+| Codex CLI | `C:\Users\27343\AppData\Local\OpenAI\Codex\bin\2993767bd1dfb009\codex.EXE`，`codex-cli 0.164.0-alpha.11.1`，`code-mode-host` 齐全；**仅进程 PATH 前置**，未改系统配置、未重装 |
+| Docker | `29.8.2`，`linux/x86_64` |
+| DeepSeek | 官方 `https://api.deepseek.com/chat/completions`，`deepseek-flash`，`api_retries=0`，streaming |
 
-**调用链（实测确认的架构）**
+## 2. 调用链（实测）
 
-| 阶段 | 传输 | 依据 |
+| 阶段 | Provider | 实测证据 |
 | --- | --- | --- |
-| 发现 / 编写 / 独立审阅 | Codex CLI `NativeSession.stage` | 本轮 discovery 回执 `model=gpt-6-astra`、usage 完整、`session_id` 记录 |
-| 入口关联 / 规划 / 契约诊断 | DeepSeek API `model_call.call(backend=deepseek_api)` | 配置 `runtime_defaults.options.backend=deepseek_api`；本轮未到该阶段（0 次 DeepSeek 调用） |
-| 回退 | 无 | 未知 backend 即报错；`api_model` 为空时不猜模型（离线用例覆盖） |
+| 发现 | Codex CLI | 138.3 s，7 个 tool 事件，usage 完整（in 104,222 / out 3,275） |
+| 编写 | Codex CLI | 184.6 s，7 个 tool 事件，usage 完整（in 381,797 / out 7,610） |
+| 独立内容审阅 | Codex CLI | 77.1 s，9 个 tool 事件，usage 完整（in 185,395 / out 1,322） |
+| 入口关联 | **DeepSeek** | 1 次请求，18.5 s，`completed`，HTTP 200 |
+| 关联独立审阅 | Codex CLI | `status=pass`、`binding_verified=true`、`requirement_assessment=confirmed` |
+| 环境规划 | **DeepSeek** | 1 次请求，52.5 s，**失败**：HTTP 200 + SSE 后读响应 OSError |
 
-局部迁移，不是全部模型阶段迁移。
+无自动回退、无提供方切换。
 
----
-
-## 2. 启动检查（均为真实执行）
-
-| 检查 | 结果 |
-| --- | --- |
-| 副本提交/工作区 | 通过（见 §1） |
-| 离线回归（本轮最后一次代码修改后） | **408 tests OK（3 skipped，POSIX-only）** |
-| DeepSeek 配置 | 通过：`.env` 解析出 `DEEPSEEK_API_KEY`(35) / `DEEPSEEK_MODEL=deepseek-flash` / `DEEPSEEK_BASE_URL`（官方）；`resolve()` 无网络预检：`https://api.deepseek.com/chat/completions`、kind=official |
-| 凭据泄漏扫描 | 通过：本轮运行树中凭据出现 **0 次**；`.env` 未进入任何证据 |
-| Codex CLI | **可解析但不完整**：`~\.codex\.sandbox-bin\codex.exe`（0.159.2），`codex_command()` 返回该路径，`isolated_options()` 生成 40 个参数并保留 provider、禁用两个 MCP 服务 —— 但缺同目录 `codex-code-mode-host.exe`（见 §4 F1） |
-| Docker | 可用：`29.8.2`，`linux/x86_64` |
-| 来源可达性（预检） | 通过：两个 URL 均 200，SHA-256 与固定值一致 |
-
-未做认证探针式模型调用；正式阶段失败计入账本（见 §5）。
-
----
-
-## 3. 本次实验配置（未预填 binding、不强制脚本）
-
-* 新 input：`validation/deepseek-api/acceptance-normal-input.json`（sha256 `6c6636c7…bfb6`）
-* 来源、prompt、model、execution、limits **与已核验的 normal-creation input 逐字节相同**（`sources`/`prompt` 逐字段比较为 `True`；prompt sha256 `348cb739…e837`）
-* **无** `runtime.<candidate>.binding`：入口解析走正式优先级（用户绑定 → 作者声明 → 保守识别；歧义仍拒绝）
-* 新增 `runtime_defaults.options`（本轮为让"候选名未知的正常创建"固定 DeepSeek 提供方而引入）：`backend=deepseek_api`、`api_model=null`、`api_retries=0`、`api_stream=true`、`api_max_output_tokens=65536`、`model_timeout=600`、`total_seconds=2400`、`reasoning_effort=medium`、`service_tier=default`、`progress_watch=observe`
-* 预算：`model_calls=8`、`model_timeout=600`、`total_seconds=3600`、`repair_rounds=1`、`max_builds=1`
-* 隔离目录：`E:\Users\27343\Docker\acceptance-deepseek-20261027\{state,library}`，不复用历史通过状态/镜像/验收结果
-
----
-
-## 4. 独立代码与迁移审查
-
-### 4.1 能力映射（以源码与实测为依据）
-
-| 能力 | 状态 | 机制测试 / 证据 |
-| --- | --- | --- |
-| 发现/编写/审阅（NativeSession） | 保留 | `tests/pipeline/test_native.py`、`test_research.py`；本轮 discovery 真实回执 |
-| 入口关联 / 规划 / 契约诊断 → DeepSeek | 适配迁移 | `tests/pipeline/test_deepseek_backend.py`（54 用例）；`c165aa5` 的 1 次真实请求记录（plan_rejected） |
-| 入口声明优先（新增） | 新增 | `tests/pipeline/test_entry_declaration.py`（17 用例） |
-| 共享运行时默认（新增） | 新增 | `tests/pipeline/test_runtime_defaults.py`（5 用例） |
-| 单一主入口/状态协议/恢复/catalog | 保留 | `cli.py` 操作集合；`store.catalog/get/qualification`；`contracts.qualify` |
-| 冻结交付 / 作者回执 / 动态执行记录分离 | 保留 | `deliveries/*.json` ↔ `evidence/*` ↔ `runtime/*` ↔ `summary.json`（`verify_bundle` 三处交叉校验） |
-| 查询/安装/恢复遵守当前资格 | 保留 | `store.qualification()` 重算 `qualify()`；`package.install_bundle` 对每个 ready 项再 `qualify()` |
-
-### 4.2 发现
-
-| # | 严重度 | 位置 | 触发条件 | 影响 / 证据 |
-| --- | --- | --- | --- | --- |
-| F1 | **high（阻断）** | `~\.codex\.sandbox-bin\codex.exe` 缺 `codex-code-mode-host.exe` | 任何使用工具的 NativeSession 回合（发现/编写/审阅） | 工具路由报 `os error 2`，模型只能返回 `blocked`；本轮实测发现阶段终止。证据 `evidence/real-batch-20261027/discovery-stderr.log` |
-| F2 | medium（流程） | 上一轮启动检查把"CLI 可用"当结论 | 仅用 `--version`/`--help` 验证 | 结论被高估：可解析≠可运行。本报告更正为"可解析、不完整"，并把"能用工具跑完一个回合"列为下次启动检查的硬条件 |
-| F3 | medium | `planner.DEFAULTS.pin_base_image` 显式未实现（请求即报错） | 需要固定基础镜像 digest | `python:3.11-slim` 这类 tag 漂移无法检测；收据记录构建出的 image id，但不 pin base。本轮未构建，**待核查**其在重建场景的实际影响 |
-| F4 | low | `entry.declared_entry()` 允许任意已交付 `.py/.sh` 作为脚本入口 | 作者把 `examples/*.py` 声明为入口 | 仍有静态检查、来源关联、独立审阅与计划校验兜底；仅残余风险，未观察到滥用 |
-| F5 | low | `preparation.render()` 渲染确定（实测两次字节相同，sha256 `c8f5695d…c891`） | — | 可复现边界仅在"同一 base image digest"内成立，见 F3 |
-| F6 | info | DeepSeek 参数映射（`medium→high`、`service_tier` 不发送） | — | 已在收据/账本中分列，未声称与 Codex 等价 |
-
-已核对且未见问题的点（依据）：manifest 对每个文件比较 `path+sha256+bytes` 且比较完整列表；环境修复不得改动锁定用例（`preparation.validate` 的 `locked_cases` 指纹检查）；上游身份记录 `repo/commit/path/sha256` 与 `snapshot_id`（本轮来源准备实测）；Codex 配置隔离保留 provider 且禁用 MCP；DeepSeek 期限/取消/清理与脱敏由 54 个离线用例覆盖。
-
-**未证明的疑点**：跨平台 manifest 在换行差异下的严格性（仅 Windows 实测）；"较新审阅拒绝对旧计划恢复的约束"仅有文档与代码路径，本轮未做真实验证 → **待核查**。
-
----
-
-## 5. 实际执行结果与账本
-
-### 5.1 阶段状态
+## 3. 各阶段状态
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
-| 来源准备 | **通过** | 2 个 URL，200，SHA-256 与固定值一致；记录 upstream（repo/commit/path/sha256）与 snapshot_id |
-| 发现 | **失败** | 回合 1 完成（有 usage），但工具宿主起不来 → `blocked`，无候选 |
-| 编写 / 独立审阅 / 入口关联 / 环境规划 | not_run | 被 F1 阻断 |
+| 来源准备 | **通过** | 2 个 URL，SHA-256 与固定值一致；记录 upstream(repo/commit/path/sha256) 与 snapshot_id |
+| 发现 | **通过** | 产出候选 `rdkit-recap-terminal-fragments` |
+| 编写 | **通过** | 交付 `SKILL.md`(5,643 B) + `references/source-notices.md`(4,738 B)，**未交付脚本** |
+| 独立内容审阅 | **通过** | `content_review=pass`、`structure=pass`、`runtime_paths=pass` |
+| 入口关联 | **通过** | 作者声明 `{"kind":"markdown_python","path":"SKILL.md","block_index":0}` → 校验通过 → DeepSeek 提案 → 精确引用校验 → 独立审阅批准 |
+| 环境规划 | **失败（传输）** | 见 §4 |
 | Docker 构建 | not_run | 0 次构建 |
-| 业务验收 / catalog 晋升 / 默认查询 / 安装 / 安装后使用 | not_run | 无正式产物 |
-| 离线回归 | **通过** | 408 tests OK（3 skipped） |
+| 业务验收 | not_run | `source-terminal-example` / `valid-empty-fragments` / `reject-blank-input` 均未执行 |
+| catalog 晋升 | not_run | 候选停在该库 `candidates/` 区（`candidate_saved`），未晋升 accepted |
+| 默认/候选查询、安装、安装后使用 | not_run | 无正式产物 |
 
-### 5.2 调用账本（应用层）
+## 4. 首个阻断点
+
+```
+阶段   environment planning（单次 DeepSeek 规划请求）
+请求   POST https://api.deepseek.com/chat/completions  model=deepseek-flash
+参数   stream=true, response_format=json_object, max_tokens=65536,
+       thinking=enabled, reasoning_effort=high（requested medium）
+回执   HTTP 200, content-type: text/event-stream
+结果   52.5 s 时读响应抛 OSError → error_class=model_stream_interrupted
+重试   0（api_retries=0，未违反）
+计划   未产出；本地 schema 校验未执行；未进入 Docker
+```
+
+规划 prompt 已按正式路径构建：**46,295 字节**，sha256 `4c3ef47a…c882`；schema 为未改动的 `PLAN_SCHEMA`（sha256 `7e53e6be…0818`）。
+
+对比同一批内的关联调用（18.5 s、小 prompt）成功，失败只出现在这个长 prompt 的流式规划上——指向**长连接流被中断**（代理/网络侧），而不是请求构造或认证问题。该判断为**推断**，未用额外调用验证。
+
+## 5. 本轮真正被验证的新能力
+
+这是上次（`84e9253`）入口声明改造的**首次真实端到端验证，并通过**：
+
+* 作者在交付回执里声明 `{"kind":"markdown_python","path":"SKILL.md","block_index":0}`；
+* 系统校验：SKILL.md 只有一个完整 python 围栏 → 抽取唯一；`block_index=0`；静态检查通过；
+* 绑定落盘 `binding.json`：`declaration_source=author_declaration`、`association=reviewed`、
+  `code_sha256=e5cca3f3…a307`、`markdown_sha256=2792eade…2e18`、`files` 清单 2 个文件、
+  来源 `recap/document.py` 精确引用 `>>> res = Recap.RecapDecompose(m)`；
+* 独立审阅 `binding_verified=true`；
+* 计划校验器未运行（规划未产出），所以"计划必须调用该入口"这一层本轮**未被验证**。
+
+**歧义政策未触发**：交付里没有脚本，只有一个 Markdown 代码块，因此保守识别本身也够用；声明机制是"顺带被真实走通"，不是唯一解。
+
+## 6. 调用账本与预算
 
 | 项 | 值 |
 | --- | --- |
-| 已用调用 | **1 / 8**（discovery，Codex `gpt-6-astra`，https/medium/default） |
-| 该次状态 | `completed`（提供方返回 usage：input 42831 / output 352 / cached 28288），31.4 s，2 个 tool 事件（均为 error） |
-| DeepSeek 请求 | **0**（未到规划/关联/诊断阶段） |
-| CLI 内部重连 | 0（events 中无 reconnect 通知） |
-| 单次耗时 | 31.4 s ≪ 600 s；进度观测 `observe_only`，最大静默 3.9 s，未触发 240 s 窗口 |
-| 批次耗时 | 约 36 s ≪ 3600 s |
-| 预算耗尽 | 否（因阻断终止，不是预算） |
+| 应用层已用调用 | **6 / 8** |
+| Codex 回合 | 4（发现、编写、内容审阅、关联审阅） |
+| DeepSeek 请求 | 2（关联 1 次完成；规划 1 次失败） |
+| 实际后端请求合计 | 6（无 CLI 内部重连，事件流中 reconnect 通知 0） |
+| 单次最长 | 184.6 s（编写） ≪ 600 s |
+| 批次墙钟 | 约 659 s ≪ 3600 s |
+| 进度观测 | `observe_only`，各回合最大静默 3.95–8.11 s，未触发 240 s 窗口 |
+| 预算耗尽 | 否（因传输失败终止，不是预算） |
 
-### 5.3 首个阻断点
+## 7. 审查发现（更新）
+
+| # | 严重度 | 位置 | 触发 | 影响 / 状态 |
+| --- | --- | --- | --- | --- |
+| F1 | ~~high~~ 已解决 | Codex CLI 缺 `codex-code-mode-host.exe` | 带工具回合 | 上批阻断；本轮换完整安装（0.164.0-alpha.11.1）后，4 个 Codex 回合全部成功 |
+| F2 | medium（流程） | 启动检查方法 | 只看 `--version/--help` | 已更正为"能跑完带工具回合"；本轮由此方式跨过 |
+| **F7** | **high（本轮阻断）** | `deepseek_api._Reader._fill()` 读 SSE 时 OSError | 长 prompt（46 KB）流式规划，约 52 s | 规划未产出 → 整批停止。仅 1 次观测，未证明可复现 |
+| **F8** | medium | 失败分支未记录已收字节数/chunk 数/errno | 任何流中断 | 无法区分"未收到任何数据"与"收到 N KB 后中断"，影响定位；建议下次前补上 |
+| F3 | medium | `pin_base_image` 未实现（显式报错） | 需要固定 base digest | 本轮未构建，未实测影响 |
+| F4 | low | 声明入口可为任意已交付 `.py/.sh` | 作者声明示例文件为入口 | 本轮未观察到滥用；由关联+审阅+计划校验兜底 |
+| F5 | low | 渲染确定性（两次渲染字节相同 `c8f5695d…c891`） | — | 可复现仅限同一 base digest |
+| F6 | info | DeepSeek 参数映射 `medium→high`、`service_tier` 不发送 | — | 已分列记录，不声称等价 |
+
+未变化的历史结论：上一阶段那次单请求回放仍为"传输/schema 通过、计划语义被未改动门禁拒绝"（`c165aa5` 证据），本轮**没有重跑它**。
+
+## 8. 未验证范围与最小剩余工作
+
+**未验证**：环境规划成功产出、计划语义门禁（`preparation.validate`）、Docker 构建、全部业务验收、catalog 晋升、默认/候选查询、隔离安装、容器内实际使用。
+
+**最小剩余工作（需你授权后执行）**
+
+1. 先补 F8（记录失败时的字节数/errno，无模型调用，跑全量回归）。
+2. 针对 F7 选择传输缓解（可同时）：
+   * `api_stream=false`：规划改为单次响应，避免长连接被中途切断（仍受 600 s 总期限约束）；
+   * `api_retries=1`：把一次瞬时断连吸收在同一 600 s 期限与账本内。
+3. 用同一份 `validation/deepseek-api/acceptance-normal-input.json`、**新的**隔离 state/library 目录重跑唯一一批（新的 8 次预算、3600 s）。
+4. 若构建与业务验收通过，再执行默认查询、隔离安装与容器内使用核验。
+
+## 9. 证据与复现
+
+脱敏证据（副本内，已扫描：运行树中凭据出现 0 次）：
 
 ```
-discovery turn 1 → codex_core::tools::router:
-failed to spawn code-mode host
-C:\Users\27343\.codex\.sandbox-bin\codex-code-mode-host.exe
-(os error 2)
+validation/deepseek-api/evidence/real-batch-run2-20261027/
+  verification.json                 阶段状态、账本、指纹、判定
+  summary.json                      运行摘要（6 次调用、来源身份）
+  record.json                       实体记录（含 runtime_preparation.gaps）
+  binding.json                      作者声明 → 绑定的完整内容（含 code_sha256、files）
+  association-proposal.json          DeepSeek 关联提案
+  association-independent-review.json 关联独立审阅（pass, binding_verified=true）
+  association-request.json / -attempts.json
+  planning-request.json / -attempts.json / -error.json   规划失败现场
 ```
-
-分类：**环境/安装缺陷**。按停止规则：不重跑、不续批、不恢复。
-
----
-
-## 6. 证据路径（副本内，已脱敏）
-
-```
-validation/deepseek-api/evidence/real-batch-20261027/
-  build.log              完整 CLI 输出
-  summary.json           运行摘要（状态、usage、来源身份）
-  discovery-stderr.log   CLI 工具路由报错原文
-  discovery-events.jsonl 发现回合事件流
-  discovery-command.json 该回合实际 CLI 命令（参数已脱敏）
-  verification.json      阶段状态、账本、指纹、判定（汇总）
-```
-运行现场（未提交）：`E:\Users\27343\Docker\acceptance-deepseek-20261027\{state,library}`。
-
----
-
-## 7. 未验证范围与最小剩余工作
-
-**未验证**：编写、独立审阅、入口关联（DeepSeek）、环境规划（DeepSeek）、一次 Docker 构建、全部业务验收、catalog 晋升、默认/候选查询、安装与安装后使用；以及 DeepSeek 在真实规划中的通过率与语义质量。
-
-**最小剩余工作（需另行授权）**
-
-1. 修复 Codex CLI 安装：让 `codex.exe` 同目录存在匹配版本（0.159.2）的 `codex-code-mode-host.exe`；或换用完整安装。**不自动重装**，由你决定。
-2. 复检方式改为"能跑完一个带工具的回合"，而不是只看 `--version`：例如用现有 discovery 路径做一次 1 回合的最小真实调用（会计入届时的预算）。
-3. 修复后，用**同一份** `acceptance-normal-input.json` 在**新的**隔离 state/library 目录重跑唯一一批（预算 8 次、3600 s）。
-4. 若通过，再执行 §五 的默认查询、隔离路径安装与容器内实际使用核验。
-
-**可用预算评估**：本轮已用 1 次（8 次预算内）；若重跑，按新的批次重新计 8 次，不叠加本次。
-
----
-
-## 8. 可复现命令
 
 ```powershell
 cd E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi
-$env:PATH = 'C:\Users\27343\.codex\.sandbox-bin;' + $env:PATH
-# 配置自检（不取源、不调模型）
-python -m creation_pipeline build validation/deepseek-api/acceptance-normal-input.json --preflight
-# 唯一一批（本轮实际执行，已失败）
+$env:PATH = 'C:\Users\27343\AppData\Local\OpenAI\Codex\bin\2993767bd1dfb009;' + $env:PATH
 python -m creation_pipeline build validation/deepseek-api/acceptance-normal-input.json `
-  --state-dir E:\Users\27343\Docker\acceptance-deepseek-20261027\state `
-  --library-dir E:\Users\27343\Docker\acceptance-deepseek-20261027\library
-# 离线回归
-python -m unittest discover -s tests -q
+  --state-dir <new>\state --library-dir <new>\library
+python -m unittest discover -s tests -q      # 最后一次代码修改后：408 OK (3 skipped)
 ```
 
-**最终 SKILL.md 直接地址**：无（本批未生成交付物）。
+**最终 SKILL.md**：本批未形成可验收交付（候选在 `library/candidates/rdkit-recap-terminal-fragments`，未晋升）。其 SKILL.md 位于该候选目录内，仅为候选态，不构成交付资格。
 
----
+## 10. 边界声明
 
-## 9. 本轮提交
-
-见 `git log`：`runtime_defaults` 支撑、新 input、证据与报告。未 merge/push/发布，源目录只读、未被修改。
-
-固定案例通过与否都不证明历史超时根因已解决，也不证明性能或跨案例稳定性；本轮更未进入性能与稳定性验证。
+一次运行未通过，不说明 DeepSeek 规划能力不足，也不说明历史 600 s 超时根因已解决；本轮只观测到规划请求在 52.5 s 被连接错误中断，未做重试对照、未做性能评估。未执行 merge / push / 发布，未修改源目录，未删除任何共享镜像或历史产物。
