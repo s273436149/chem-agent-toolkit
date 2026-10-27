@@ -142,8 +142,21 @@ budget from what is actually left, so no phase can borrow a stale timeout:
 | TLS handshake | socket re-armed with the remaining budget after the TCP connect succeeds |
 | Send (request line, headers, body) | re-armed immediately before the send |
 | Header wait (`getresponse`) | re-armed immediately before the wait, not inherited from connect |
-| Stream/body reads | 5 s slices, with the wall-clock deadline re-checked before every read |
+| Stream/body reads | armed from the remaining budget on the socket captured right after `connect()`; a read timeout therefore *is* the deadline, and the reader is never reused after one |
 | Retry pause | clamped to the remaining budget |
+
+Two implementation details matter here and were both wrong in the first version:
+
+* `HTTPConnection.getresponse()` drops `connection.sock` when the server answers
+  `Connection: close`, so arming through `connection.sock` silently did nothing. The
+  live socket is captured after `connect()` (it outlives http.client's reference) and
+  every later timeout is armed on that.
+* A short per-read slice (for example 5 s) is wrong: `socket.SocketIO` sets a
+  one-shot flag, so after a timeout the next read on the same `HTTPResponse` raises
+  `OSError: cannot read from timed out object`. A healthy but slow stream would then
+  be reported as a broken connection. Reads are therefore armed with the whole
+  remaining budget and a timeout is reported as `model_timeout` (`detail.phase`
+  `stream_read`), never retried.
 
 A socket timeout that fires because the armed budget ran out is classified
 `model_timeout`, not `model_connection_failed`. On expiry or cancellation the

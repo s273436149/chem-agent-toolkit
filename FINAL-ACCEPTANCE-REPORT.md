@@ -69,7 +69,12 @@
 
 规划 prompt 已按正式路径构建：**46,295 字节**，sha256 `4c3ef47a…c882`；schema 为未改动的 `PLAN_SCHEMA`（sha256 `7e53e6be…0818`）。
 
-对比同一批内的关联调用（18.5 s、小 prompt）成功，失败只出现在这个长 prompt 的流式规划上——指向**长连接流被中断**（代理/网络侧），而不是请求构造或认证问题。该判断为**推断**，未用额外调用验证。
+**归因更正（重要）**：我最初把这次中断推断为"代理/网络切断长连接"。经离线复现，真实原因是我在 `_Reader` 里引入的**本地读取缺陷**，与代理无关：
+
+* `_Reader._fill()` 每次读取只给 5 秒超时，超时后**继续读同一个 `HTTPResponse`**；而 `socket.SocketIO` 在超时后置一次性标志，下一次读立即抛 `OSError: cannot read from timed out object`，被我误包装成"连接中断"。用真实 `http.client` 复现：第二次 `read1` 抛 `TimeoutError`，第三次抛该 `OSError`。
+* 同时发现第二个缺陷：响应带 `Connection: close` 时 `getresponse()` 会把 `connection.sock` 置为 `None`，我所有 `settimeout` 静默失效——切片在两种响应头下行为不一致。
+
+修复（`deepseek_api.py`）：读取超时改为"**等于剩余期限**"，超时即判 `model_timeout`（`detail.phase=stream_read`），**永不重试同一 reader**；socket 在 `connect()` 后捕获并沿用到读者与 `_arm()`；失败时记录 `bytes_received`/`errno`/异常原文。新增 4 个用例（keep-alive 长间隔、`Connection: close` 长间隔、keep-alive 期限仍生效、超时不重试与失败取证）。
 
 ## 5. 本轮真正被验证的新能力
 
@@ -104,8 +109,8 @@
 | --- | --- | --- | --- | --- |
 | F1 | ~~high~~ 已解决 | Codex CLI 缺 `codex-code-mode-host.exe` | 带工具回合 | 上批阻断；本轮换完整安装（0.164.0-alpha.11.1）后，4 个 Codex 回合全部成功 |
 | F2 | medium（流程） | 启动检查方法 | 只看 `--version/--help` | 已更正为"能跑完带工具回合"；本轮由此方式跨过 |
-| **F7** | **high（本轮阻断）** | `deepseek_api._Reader._fill()` 读 SSE 时 OSError | 长 prompt（46 KB）流式规划，约 52 s | 规划未产出 → 整批停止。仅 1 次观测，未证明可复现 |
-| **F8** | medium | 失败分支未记录已收字节数/chunk 数/errno | 任何流中断 | 无法区分"未收到任何数据"与"收到 N KB 后中断"，影响定位；建议下次前补上 |
+| **F7** | **high（已定位并修复）** | `deepseek_api._Reader._fill()` | 读取间隔 > 5 秒，或任何超过切片的一次静默 | 旧实现把健康慢流误判为连接中断；`Connection: close` 时切片又静默失效。已改为剩余期限即读取超时、超时即 `model_timeout`、不重试，并在 `connect()` 后捕获 socket |
+| **F8** | **medium（已修复）** | 失败分支 | 任何读取失败 | 现在记录 `bytes_received`、`errno` 与异常原文；不再只有 "OSError" 三个字 |
 | F3 | medium | `pin_base_image` 未实现（显式报错） | 需要固定 base digest | 本轮未构建，未实测影响 |
 | F4 | low | 声明入口可为任意已交付 `.py/.sh` | 作者声明示例文件为入口 | 本轮未观察到滥用；由关联+审阅+计划校验兜底 |
 | F5 | low | 渲染确定性（两次渲染字节相同 `c8f5695d…c891`） | — | 可复现仅限同一 base digest |

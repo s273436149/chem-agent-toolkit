@@ -88,9 +88,9 @@ EFFORT_NOTE = ('reasoning_effort uses the provider compatibility ladder '
                '(minimal->low, medium->high, xhigh->high); the requested and sent '
                'values are different and are not claimed to be equivalent')
 
-# One socket read is bounded by this slice; the wall-clock deadline is checked
-# around every read, so the slice is a granularity, never the overall limit.
-READ_SLICE_SECONDS = 5.0
+# One socket read is bounded by the remaining deadline; the granularity constant
+# below is gone on purpose. A shorter slice would time out a healthy slow stream and
+# poison http.client's reader ("cannot read from timed out object").
 ERROR_BODY_LIMIT = 8192
 REQUEST_ID_HEADERS = ('x-request-id', 'x-ds-request-id', 'request-id', 'x-trace-id')
 
@@ -384,49 +384,70 @@ def _ledger(settings, attempts):
 
 
 # ---- transport ----------------------------------------------------------------
-class _Reader:
-    """Buffered reader that enforces one wall-clock deadline across every read."""
+def _exception_text(exc, limit=200):
+    """Keep the exception class and message; the caller scrubs credentials."""
+    message = str(exc).strip()
+    text = type(exc).__name__ + (': ' + message if message else '')
+    return text[:limit]
 
-    def __init__(self, response, connection, deadline):
+
+class _Reader:
+    """Buffered reader bounded by one wall-clock deadline.
+
+    The read timeout is armed from the remaining budget and is never shorter than
+    it. A timeout therefore means the deadline expired, so the reader is never
+    reused after a timeout: ``socket.SocketIO`` raises
+    ``OSError: cannot read from timed out object`` on the next read, which would be
+    misreported as a broken connection.
+    """
+
+    def __init__(self, response, connection, deadline, sock=None):
         self.response = response
         self.connection = connection
         self.deadline = deadline
+        # ``HTTPConnection.getresponse()`` closes its own reference when the server
+        # says ``Connection: close``, so keep the socket captured after connect().
+        self.sock = sock if sock is not None else getattr(connection, 'sock', None)
         self.buffer = b''
         self.gaps = 0
         self.bytes = 0
         self.eof = False
 
     def _fill(self):
-        while True:
-            remaining = self.deadline - time.monotonic()
-            if remaining <= 0:
-                raise ApiTransportError(
-                    'Total model call deadline expired while reading the response; '
-                    'the connection was closed', code='model_timeout')
-            sock = getattr(self.connection, 'sock', None)
-            if sock is not None:
-                try:
-                    sock.settimeout(max(0.05, min(remaining, READ_SLICE_SECONDS)))
-                except OSError:
-                    pass
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise ApiTransportError(
+                'Total model call deadline expired while reading the response; '
+                'the connection was closed', code='model_timeout',
+                detail={'phase': 'stream_read', 'bytes_received': self.bytes})
+        if self.sock is not None:
             try:
-                data = self.response.read1(65536)
-            except (socket.timeout, TimeoutError):
-                # A keep-alive gap is liveness, not generation progress.
-                self.gaps += 1
-                continue
-            except ssl.SSLError as exc:
-                raise ApiTransportError('TLS failure while reading the model response: '
-                                        + type(exc).__name__, code='model_stream_interrupted') from exc
-            except (OSError, http.client.HTTPException) as exc:
-                raise ApiTransportError('Model connection failed while reading the response: '
-                                        + type(exc).__name__, code='model_stream_interrupted') from exc
-            if not data:
-                self.eof = True
-                return False
-            self.bytes += len(data)
-            self.buffer += data
-            return True
+                self.sock.settimeout(max(0.05, remaining))
+            except OSError:
+                pass
+        try:
+            data = self.response.read1(65536)
+        except (socket.timeout, TimeoutError) as exc:
+            raise ApiTransportError(
+                'Total model call deadline expired while waiting for the model stream',
+                code='model_timeout',
+                detail={'phase': 'stream_read', 'bytes_received': self.bytes,
+                        'exception': _exception_text(exc)}) from exc
+        except ssl.SSLError as exc:
+            raise ApiTransportError('TLS failure while reading the model response: '
+                                    + _exception_text(exc), code='model_stream_interrupted',
+                                    detail={'bytes_received': self.bytes}) from exc
+        except (OSError, http.client.HTTPException) as exc:
+            raise ApiTransportError('Model connection failed while reading the response: '
+                                    + _exception_text(exc), code='model_stream_interrupted',
+                                    detail={'bytes_received': self.bytes,
+                                            'errno': getattr(exc, 'errno', None)}) from exc
+        if not data:
+            self.eof = True
+            return False
+        self.bytes += len(data)
+        self.buffer += data
+        return True
 
     def readline(self):
         """Return one line without its newline, or None at end of stream."""
@@ -512,21 +533,23 @@ def _connect_before(host, port, deadline):
     raise failure or OSError('No usable address for the model host')
 
 
-def _arm(connection, deadline):
+def _arm(connection, deadline, sock=None):
     """Re-derive the socket timeout from the remaining budget before a blocking step.
 
     This is what keeps connect, send, header wait and stream reads inside one total
     deadline: each step is bounded by what is actually left, not by a stale timeout.
+    ``sock`` is the reference captured after connect(), because http.client drops its
+    own when the server answers ``Connection: close``.
     """
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise ApiTransportError(
             'Total model call deadline expired before the next network step',
             code='model_timeout')
-    sock = getattr(connection, 'sock', None)
-    if sock is not None:
+    target = sock if sock is not None else getattr(connection, 'sock', None)
+    if target is not None:
         try:
-            sock.settimeout(max(0.05, remaining))
+            target.settimeout(max(0.05, remaining))
         except OSError:
             pass
     return remaining
@@ -675,8 +698,8 @@ def _decode_answer(content, schema):
     return answer
 
 
-def _consume_stream(settings, response, connection, deadline, destination, state):
-    reader = _Reader(response, connection, deadline)
+def _consume_stream(settings, response, connection, deadline, destination, state, sock=None):
+    reader = _Reader(response, connection, deadline, sock)
     content = []
     data_lines = []
 
@@ -763,8 +786,8 @@ def _consume_stream(settings, response, connection, deadline, destination, state
     return ''.join(content)
 
 
-def _consume_single(settings, response, connection, deadline, destination, state):
-    reader = _Reader(response, connection, deadline)
+def _consume_single(settings, response, connection, deadline, destination, state, sock=None):
+    reader = _Reader(response, connection, deadline, sock)
     raw = reader.read_all()
     state['bytes'] = len(raw)
     state['gap_retries'] = reader.gaps
@@ -901,11 +924,15 @@ def call(prompt, schema, model, *, timeout, audit_dir=None, options=None, reason
                  'reasoning_chars': 0, 'bytes': 0, 'gap_retries': 0}
         connection = None
         response = None
+        sock = None
         try:
             connection = _connection(settings, deadline)
             connection.connect()                       # DNS + TCP + TLS, all deadline-bounded
+            # Capture the live socket here: getresponse() drops connection.sock for a
+            # Connection: close response, and every later timeout must still be armed.
+            sock = getattr(connection, 'sock', None)
             record['connected_seconds'] = round(time.monotonic() - started, 3)
-            _arm(connection, deadline)                 # send is bounded by what is left
+            _arm(connection, deadline, sock)           # send is bounded by what is left
             connection.putrequest('POST', settings.path())
             connection.putheader('Content-Type', 'application/json; charset=utf-8')
             connection.putheader('Accept', 'text/event-stream' if settings.stream else 'application/json')
@@ -914,24 +941,25 @@ def call(prompt, schema, model, *, timeout, audit_dir=None, options=None, reason
             connection.endheaders()
             connection.send(payload)
             record['sent_seconds'] = round(time.monotonic() - started, 3)
-            _arm(connection, deadline)                 # header wait is re-derived, not stale
+            _arm(connection, deadline, sock)           # header wait is re-derived, not stale
             response = connection.getresponse()
             record['http_status'] = response.status
+            record['connection_close'] = bool(getattr(response, 'will_close', False))
             headers = response.getheaders()
             record['response_headers'] = {name.lower(): value for name, value in headers
-                                          if name.lower() in ('content-type',) + REQUEST_ID_HEADERS}
+                                          if name.lower() in ('content-type', 'connection') + REQUEST_ID_HEADERS}
             header_id = _request_id(headers, None)
             if header_id:
                 record['request_id'] = header_id
             if response.status != 200:
-                reader = _Reader(response, connection, deadline)
+                reader = _Reader(response, connection, deadline, sock)
                 raise _status_error(response.status, _error_payload(reader, settings))
             if settings.stream:
                 content = _consume_stream(settings, response, connection, deadline,
-                                          destination, state)
+                                          destination, state, sock)
             else:
                 content = _consume_single(settings, response, connection, deadline,
-                                          destination, state)
+                                          destination, state, sock)
             _check_finish(state['finish_reason'])
             answer = _decode_answer(content, schema)
             request_id = header_id or (_request_id((), state['body_id']))
@@ -961,6 +989,10 @@ def call(prompt, schema, model, *, timeout, audit_dir=None, options=None, reason
             record.update(status='failed', error_class=exc.code,
                           error=settings.scrub(str(exc))[:500],
                           elapsed_seconds=round(time.monotonic() - started, 3))
+            if getattr(exc, 'detail', None):
+                # Keep the failure forensics: bytes already received and the original
+                # exception distinguish "no data" from "cut mid-stream".
+                record['detail'] = sanitized(exc.detail)
             attempts.append(record)
             if destination:
                 _save(settings, destination, 'attempts.json', _ledger(settings, attempts))

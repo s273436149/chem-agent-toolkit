@@ -117,6 +117,29 @@ def sse(items, status=200, headers=None):
     return script
 
 
+def sse_chunked(items, status=200):
+    """Keep-alive chunked SSE: http.client keeps its socket instead of closing it.
+
+    That is the mode in which a short per-read timeout used to poison the reader
+    ("cannot read from timed out object"), so it is exercised explicitly.
+    """
+    def script(handler):
+        handler.send_response(status)
+        handler.send_header('Content-Type', 'text/event-stream')
+        handler.send_header('Transfer-Encoding', 'chunked')
+        handler.end_headers()
+        for item in items:
+            if isinstance(item, tuple) and item[0] == 'sleep':
+                time.sleep(item[1])
+                continue
+            data = item.encode('utf-8') if isinstance(item, str) else item
+            handler.wfile.write(('%x\r\n' % len(data)).encode() + data + b'\r\n')
+            handler.wfile.flush()
+        handler.wfile.write(b'0\r\n\r\n')
+        handler.wfile.flush()
+    return script
+
+
 def data_line(payload):
     return 'data: %s\n\n' % json.dumps(payload)
 
@@ -531,13 +554,80 @@ class DeadlineAndCancellationTests(DeepSeekCase):
         self.assertEqual(self.server.requests, [])
         self.assertFalse(self.read('request.json')['request_sent'])
 
-    def test_read_timeout_is_not_mistaken_for_the_total_deadline(self):
-        # Several keep-alive gaps longer than one read slice must still finish
-        # inside the total deadline, instead of aborting on a single slow read.
-        self.server.push(sse([('sleep', 0.2), ': keep-alive\n\n', ('sleep', 0.2)]
-                             + frames(json.dumps({'ok': True, 'note': 'slow'}))))
-        answer, _ = self.call(timeout=10)
-        self.assertEqual(answer['note'], 'slow')
+    def test_silent_gap_is_not_a_read_failure_on_a_keep_alive_stream(self):
+        # Regression: a short per-read timeout used to fire on a healthy slow stream,
+        # and the next read on the same HTTPResponse raised
+        # "OSError: cannot read from timed out object", reported as a broken link.
+        self.server.push(sse_chunked([data_line({'id': 'x', 'choices': [{'index': 0,
+                                                                       'delta': {'content': '{"ok":'}}]}),
+                                      ('sleep', 6.0)]
+                                     + frames('true,"note":"slow"}')))
+        answer, receipt = self.call(timeout=30)
+        self.assertEqual(answer, {'ok': True, 'note': 'slow'})
+        self.assertEqual(receipt['completion']['finish_reason'], 'stop')
+
+    def test_silent_gap_is_tolerated_when_the_server_closes_the_connection(self):
+        # Same gap with "Connection: close": http.client drops connection.sock during
+        # getresponse(), so the deadline must be armed on the socket captured earlier.
+        self.server.push(sse([data_line({'id': 'x', 'choices': [{'index': 0,
+                                                               'delta': {'content': '{"ok":'}}]}),
+                              ('sleep', 6.0)] + frames('true,"note":"slow"}')))
+        answer, _ = self.call(timeout=30)
+        self.assertEqual(answer, {'ok': True, 'note': 'slow'})
+
+    def test_keep_alive_stream_still_honours_the_total_deadline(self):
+        def script(handler):
+            handler.send_response(200)
+            handler.send_header('Content-Type', 'text/event-stream')
+            handler.send_header('Transfer-Encoding', 'chunked')
+            handler.end_headers()
+            for _ in range(5):
+                with contextlib.suppress(OSError):
+                    handler.wfile.write(b'2\r\n:\n\r\n')   # one SSE keep-alive comment
+                    handler.wfile.flush()
+                time.sleep(1.0)
+            with contextlib.suppress(OSError):
+                handler.wfile.write(b'0\r\n\r\n')
+                handler.wfile.flush()
+
+        self.server.push(script)
+        started = time.monotonic()
+        with self.assertRaises(model_call.ModelExecutionError) as caught:
+            self.call(timeout=2)
+        self.assertEqual(caught.exception.code, 'model_timeout')
+        self.assertLess(time.monotonic() - started, 8)
+        attempt = self.read('attempts.json')['attempts'][-1]
+        self.assertEqual(attempt['error_class'], 'model_timeout')
+        self.assertEqual(attempt['detail']['phase'], 'stream_read')
+
+    def test_reader_failure_keeps_the_exception_and_received_bytes(self):
+        class _Fake:
+            def read1(self, n=-1):
+                raise ConnectionResetError(10054, 'reset by peer')
+
+        reader = deepseek_api._Reader(_Fake(), None, time.monotonic() + 30, None)
+        with self.assertRaises(deepseek_api.ApiTransportError) as caught:
+            reader._fill()
+        self.assertEqual(caught.exception.code, 'model_stream_interrupted')
+        self.assertIn('ConnectionResetError', str(caught.exception))
+        self.assertIn('reset by peer', str(caught.exception))
+        self.assertEqual(caught.exception.detail['bytes_received'], 0)
+        self.assertEqual(caught.exception.detail['errno'], 10054)
+
+    def test_a_read_timeout_is_a_deadline_verdict_and_is_never_retried(self):
+        calls = {'n': 0}
+
+        class _Slow:
+            def read1(self, n=-1):
+                calls['n'] += 1
+                raise TimeoutError('timed out')
+
+        reader = deepseek_api._Reader(_Slow(), None, time.monotonic() + 30, None)
+        with self.assertRaises(deepseek_api.ApiTransportError) as caught:
+            reader._fill()
+        self.assertEqual(caught.exception.code, 'model_timeout')
+        self.assertEqual(caught.exception.detail['phase'], 'stream_read')
+        self.assertEqual(calls['n'], 1)  # the poisoned reader is never read again
 
     def test_total_deadline_bounds_a_server_that_never_sends_headers(self):
         def script(handler):
