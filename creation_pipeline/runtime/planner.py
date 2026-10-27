@@ -123,10 +123,6 @@ def options(settings):
             raise PlanningError("Invalid " + key)
     if type(result['pin_base_image']) is not bool:
         raise PlanningError("Invalid pin_base_image flag")
-    if result['pin_base_image']:
-        # Nothing pins the base image yet. Accepting the flag and ignoring it
-        # reads as a guarantee the build does not provide.
-        raise PlanningError("pin_base_image is not implemented; the base image identity is recorded per build instead")
     if not re.fullmatch(r"[1-9][0-9]*[kmg]", str(result["memory"])):
         raise PlanningError("Invalid memory limit")
     if not 0 < float(result["cpus"]) <= 32:

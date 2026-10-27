@@ -32,10 +32,29 @@ def gap(code, detail, lane="environment"):
     unsupported = {'platform_unsupported', 'unsupported_resource', 'resource_mount_unresolved',
                    'credential_delivery_unresolved', 'service_unverified'}
     unresolved = {'resources_unknown', 'requirements_unknown', 'plan_unresolved', 'resource_binding_changed', 'draft_only'}
-    temporary = {'docker_unavailable', 'memory_insufficient', 'cpu_insufficient', 'resource_missing', 'credential_missing'}
+    temporary = {'docker_unavailable', 'memory_insufficient', 'cpu_insufficient', 'resource_missing', 'credential_missing',
+                 'base_image_unresolved', 'base_image_unavailable'}
     kind = ('unsupported_contract' if code in unsupported else 'unresolved_input' if code in unresolved
             else 'temporary_resource' if code in temporary else 'caller_limit' if code == 'explicit_budget' else 'failure')
     return {"code": code, "detail": detail, "repair_lane": lane, 'blocker_kind': kind}
+
+
+def base_image_reference(reference):
+    """The repository part of an image reference (tag and digest removed)."""
+    reference = str(reference).split('@')[0]
+    last = reference.rsplit('/', 1)[-1]
+    return reference.rsplit(':', 1)[0] if ':' in last else reference
+
+
+def pinned_base_gap(pin, probe_timeout=30):
+    """A pinned base image must still resolve locally before a build reuses it."""
+    if not isinstance(pin, dict) or not pin.get('repo_digest'):
+        return None
+    probe = process(['docker', 'image', 'inspect', pin['repo_digest'], '--format', '{{.Id}}'], probe_timeout)
+    if probe['exit_code'] != 0:
+        return gap('base_image_unavailable',
+                   'Pinned base image is not present locally: ' + str(pin['repo_digest']))
+    return None
 
 
 def binding_identity(request):
@@ -66,6 +85,34 @@ class LocalExecutor:
             result["gaps"].append(gap("docker_probe_unknown", "Docker returned incomplete host facts"))
         return result
 
+    def resolve_base_image(self, reference, timeout=120):
+        """Resolve a base image reference to the digest a build must reuse.
+
+        Pulling first makes the resolved identity an observed fact rather than a tag
+        that can move between builds. Failure blocks preparation: pinning that is not
+        verified would read as a reproducibility guarantee the build does not have.
+        """
+        from .preparation import RuntimeBlocked
+        pull = process(['docker', 'pull', reference], max(1, int(timeout)))
+        if pull['exit_code'] != 0:
+            raise RuntimeBlocked('base_image_unresolved',
+                                 'Base image could not be pulled: ' + redact(pull['stderr'])[-300:], 'environment')
+        info = process(['docker', 'image', 'inspect', reference, '--format', '{{json .RepoDigests}}'],
+                       min(max(1, int(timeout)), 60))
+        try:
+            digests = json.loads(info['stdout']) if info['exit_code'] == 0 else None
+        except ValueError:
+            digests = None
+        repo = base_image_reference(reference)
+        digest = next((str(item).split('@', 1)[1] for item in (digests or [])
+                       if str(item).startswith(repo + '@') and re.fullmatch(r'sha256:[0-9a-f]{64}', str(item).split('@', 1)[1])),
+                      None)
+        if not digest:
+            raise RuntimeBlocked('base_image_unresolved',
+                                 'Base image has no verifiable repository digest: ' + str(reference), 'environment')
+        return {'reference': str(reference), 'repository': repo, 'digest': digest,
+                'repo_digest': repo + '@' + digest}
+
     def inputs(self, request):
         if request.executor_kind != 'local-docker' or request.target_id != 'local':
             raise ValueError('Remote execution is not implemented or authorized by this local adapter')
@@ -89,6 +136,11 @@ class LocalExecutor:
         gaps = list(host["gaps"])
         plan = env.get("plan")
         delivery = record['delivery']
+        if env.get('base_image'):
+            # A pinned base image is part of the frozen identity; verify it before build.
+            pinned = pinned_base_gap(env['base_image'], self.probe_timeout)
+            if pinned:
+                gaps.append(pinned)
         if delivery['mode'] != 'normal':
             gaps.append(gap('draft_only', 'Drafts cannot execute Docker builds through this adapter', 'requirement'))
         if delivery['inputs']['requirement']['status'] != 'required':

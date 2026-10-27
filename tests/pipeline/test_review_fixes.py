@@ -90,10 +90,14 @@ class EntrySelectionTests(unittest.TestCase):
 
 
 class PinBaseImageTests(unittest.TestCase):
-    def test_unimplemented_pin_flag_is_refused_instead_of_ignored(self):
+    def test_the_pin_flag_is_now_supported_and_still_typed(self):
+        # Pinning used to be refused as unimplemented. It is implemented now:
+        # tests/pipeline/test_pin_base_image.py covers resolution, rendering, freezing
+        # and the execution probe. Only the flag's type is still enforced here.
         self.assertFalse(planner.options({})['pin_base_image'])
-        with self.assertRaisesRegex(planner.PlanningError, 'not implemented'):
-            planner.options({'pin_base_image': True})
+        self.assertTrue(planner.options({'pin_base_image': True})['pin_base_image'])
+        with self.assertRaisesRegex(planner.PlanningError, 'pin_base_image'):
+            planner.options({'pin_base_image': 'yes'})
 
 
 class AgentStallClassificationTests(unittest.TestCase):

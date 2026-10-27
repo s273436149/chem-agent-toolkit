@@ -221,7 +221,7 @@ def propose(source, binding, audit, opts, constraints=None, locked=None, feedbac
     raise RuntimeBlocked("explicit_attempt_limit", "Configured planning attempt limit reached")
 
 
-def render(source, target, plan, cases):
+def render(source, target, plan, cases, base_image_pin=None):
     """Container-only installation; final delivered code copied unchanged."""
     target.mkdir(parents=True)
     names = set(plan["source_files"]) | {"package/" + f["path"] for f in manifest(source / "package")}
@@ -235,7 +235,9 @@ def render(source, target, plan, cases):
             raise planner.PlanningError("Generated installation file may not replace delivery/source")
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(f["content"], encoding="utf-8")
-    lines = ["FROM " + plan["base_image"], "WORKDIR /opt/skill", "ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp"]
+    # A pinned base image is the digest observed during preparation, never the tag.
+    base = base_image_pin['repo_digest'] if base_image_pin else plan["base_image"]
+    lines = ["FROM " + base, "WORKDIR /opt/skill", "ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp"]
     lines += ["ENV " + e["name"] + "=" + json.dumps(e["value"]) for e in plan["environment"]]
     prefix = plan["build_layout"]["prefix_steps"]
     if prefix:
@@ -245,6 +247,28 @@ def render(source, target, plan, cases):
     lines += ["USER 10001:10001", "ENTRYPOINT " + json.dumps(plan["entrypoint"])]
     (target / "Dockerfile").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (target / ".dockerignore").write_text("__pycache__/\n*.pyc\n", encoding="utf-8")
+
+
+def pin_base_image(record, plan, opts, executor):
+    """The digest a pinned build must reuse, reused across revisions of one reference.
+
+    Resolution is an observed registry fact, not a plan claim: the plan keeps the
+    human-meaningful reference and the frozen environment keeps the digest that was
+    actually resolved for it.
+    """
+    if not opts.get('pin_base_image'):
+        return None
+    previous = ((record.get('delivery') or {}).get('inputs', {}).get('environment') or {}).get('payload') or {}
+    pinned = previous.get('base_image') if isinstance(previous, dict) else None
+    if (isinstance(pinned, dict) and pinned.get('reference') == plan.get('base_image')
+            and re.fullmatch(r'sha256:[0-9a-f]{64}', str(pinned.get('digest')))
+            and pinned.get('repo_digest') == str(pinned.get('repository')) + '@' + str(pinned.get('digest'))):
+        return pinned
+    resolve = getattr(executor, 'resolve_base_image', None)
+    if resolve is None:
+        raise RuntimeBlocked('base_image_unresolved',
+                             'This executor cannot resolve a base image digest for pinning', 'environment')
+    return resolve(plan.get('base_image'), opts.get('registry_seconds', 120))
 
 
 def rebind(record, binding, environment, acceptance):
@@ -371,7 +395,10 @@ def prepare(record, package, sources, workspace, spec, executor, call_guard=None
                 raise planner.PlanningError('Environment repair changed locked tests or mapped checks')
         write_json(target / "proposed-plan.json", p)
         write_json(target / "locked-tests.json", {"cases": cases, "policy": json.loads(p["acceptance_json"])})
-        render(source, target / "context", p, cases)
+        base_image_pin = pin_base_image(record, p, opts, executor)
+        if base_image_pin:
+            write_json(target / "base-image.json", base_image_pin)
+        render(source, target / "context", p, cases, base_image_pin)
         write_json(target / "plan.json", p)
         if review_evidence is not None:
             write_json(target / 'independent-contract-review.json', review_evidence)
@@ -384,7 +411,10 @@ def prepare(record, package, sources, workspace, spec, executor, call_guard=None
         required_names = {r["description"] for r in p["resources"] if r["required_for_execution"]}
         resource_inputs = {key: {k: v for k, v in value.items() if k in {"sha256", "env"}}
                            for key, value in spec.get("resource_refs", {}).items() if key in required_names}
-        rebind(record, binding, {"plan": p, "materials": manifest(target), "limits": opts, "resource_inputs": resource_inputs},
+        environment = {"plan": p, "materials": manifest(target), "limits": opts, "resource_inputs": resource_inputs}
+        if base_image_pin:
+            environment["base_image"] = base_image_pin
+        rebind(record, binding, environment,
                {"cases": cases, "policy": json.loads(p["acceptance_json"]), "author_tests": author_tests,
                 "input_anchors": anchors})
     except (RuntimeBlocked, planner.PlanningError, planner.ModelUnavailable, OSError, ValueError, ImportError) as exc:
