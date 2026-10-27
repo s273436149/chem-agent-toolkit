@@ -225,7 +225,7 @@ PLAN_SCHEMA = obj({
                           "source_paths": arr(), "basis": S,
                           "oracle_status": {"type": "string", "enum": ["supported", "candidate", "regression"]},
                           "tolerance": {"type": "number", "minimum": 0}, "limitations": arr(),
-                          "case_json": S})),
+                          "case_json": {"type": ["string", "object"]}})),
     })})
 
 
@@ -763,8 +763,10 @@ Incomplete contracts are rejected BEFORE locking with structured feedback; fix
 the stated conflict within budget, preserve promised operations and upstream tests.
 """
 # Replace this node: mutating it would annotate every field sharing S, including PATCH_SCHEMA.
+# The model follows the schema type, not the prose: accept the object encoding here too
+# and normalise it before the strict plan checks run.
 PLAN_SCHEMA['properties']['plan']['properties']['acceptance_json'] = {
-    'type': 'string', 'description': ACCEPTANCE_SPEC}
+    'type': ['string', 'object'], 'description': ACCEPTANCE_SPEC}
 PATCH_SCHEMA['description'] = ACCEPTANCE_SPEC
 POLICY += '\nFollow the acceptance_json schema description: grounded v2 contracts, locked before execution.'
 

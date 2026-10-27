@@ -56,9 +56,11 @@ class PlannerSchemaTests(unittest.TestCase):
         the current ``ACCEPTANCE_SPEC`` by the test above. Pinning the old text here
         would let the model be sent a contract the validators no longer accept.
 
-        ``value_json`` is the one deliberate structural change: a ``remove`` operation
-        has no value, and requiring one made a correct answer fail schema validation
-        (run 9). It is removed from the baseline copy here and asserted explicitly.
+        ``value_json`` and the two JSON-text field types are deliberate structural
+        changes: a ``remove`` operation has no value, and the model follows a schema
+        type over prose, so the plan fields accept the object encoding the validator
+        already normalises. Both changes are asserted here and normalised on the
+        baseline copy before the exact comparison.
         """
         root = Path(__file__).resolve().parents[2] / 'validation/planner-schema-isolation/before'
         for name, current, intended in [
@@ -71,6 +73,12 @@ class PlannerSchemaTests(unittest.TestCase):
                 self.assertIn('value_json', required)
                 self.assertEqual(required, ['op', 'path', 'value_json'])
                 baseline['properties']['operations']['items']['required'] = ['op', 'path']
+            else:
+                plan_props = baseline['properties']['plan']['properties']
+                self.assertEqual(plan_props['acceptance_json']['type'], 'string')
+                self.assertEqual(plan_props['tests']['items']['properties']['case_json']['type'], 'string')
+                plan_props['acceptance_json']['type'] = ['string', 'object']
+                plan_props['tests']['items']['properties']['case_json']['type'] = ['string', 'object']
             # Documentation is compared by the test above, not pinned to a snapshot.
             self.assertEqual(strip_descriptions(current), strip_descriptions(baseline))
 

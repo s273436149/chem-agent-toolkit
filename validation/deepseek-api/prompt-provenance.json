@@ -4,14 +4,14 @@
     "acceptance_spec_sha256": "b8753b01ddec16d38222137a582e2bfad0b92522e8bdb52537305e2beea4f589",
     "input_contract_spec_sha256": "e8b2ef6da6f71c9673c8430c26392b1a5c06d8eda0e715902ce389a352356ccb",
     "patch_schema_sha256": "0fd625f5b73f616da04ca3aa5aeb86afe942c3763fd3d2268f81ed0556a8a530",
-    "plan_schema_sha256": "d77a3ba054a1d71f71d788b25c461db391f8d3c937b149d6cb1dbf89e561b333",
+    "plan_schema_sha256": "cbd249a2d0885c26327c9254fdd8c3a2020038d122bf8bff71426e8e0a95e824",
     "policy_bytes": 12891,
     "policy_sha256": "848fdf2dd2343b940752d4c7edc282806af81d02657846e614a6e86fa114ef9f"
   },
   "frozen_fixture": {
     "prompt_bytes": 15650,
     "prompt_sha256": "2df1445023dc0b687f1668d9021f343e7af8fcf8e0f36484ac2335a5e912139e",
-    "schema_sha256": "d77a3ba054a1d71f71d788b25c461db391f8d3c937b149d6cb1dbf89e561b333",
+    "schema_sha256": "cbd249a2d0885c26327c9254fdd8c3a2020038d122bf8bff71426e8e0a95e824",
     "status": "frozen",
     "used_by": "validation/deepseek-api/verify_planner.py only"
   },
@@ -41,8 +41,8 @@
       "policy_sha256": "848fdf2dd2343b940752d4c7edc282806af81d02657846e614a6e86fa114ef9f",
       "prompt_bytes": 13360,
       "prompt_sha256": "236e15196e2d78c1c7064a441fdf5924c938a815b2c75a4e811c58ddf94ae33b",
-      "schema_bytes": 10813,
-      "schema_sha256": "d77a3ba054a1d71f71d788b25c461db391f8d3c937b149d6cb1dbf89e561b333"
+      "schema_bytes": 10837,
+      "schema_sha256": "cbd249a2d0885c26327c9254fdd8c3a2020038d122bf8bff71426e8e0a95e824"
     },
     "rejected_candidate": {
       "acceptance_spec_bytes": 6103,
@@ -69,8 +69,8 @@
       "policy_sha256": "848fdf2dd2343b940752d4c7edc282806af81d02657846e614a6e86fa114ef9f",
       "prompt_bytes": 48615,
       "prompt_sha256": "2908e55169fee8e530f5e2a86963a19789aa2d61851f3d79e788f0f3cfbb8c21",
-      "schema_bytes": 10813,
-      "schema_sha256": "d77a3ba054a1d71f71d788b25c461db391f8d3c937b149d6cb1dbf89e561b333"
+      "schema_bytes": 10837,
+      "schema_sha256": "cbd249a2d0885c26327c9254fdd8c3a2020038d122bf8bff71426e8e0a95e824"
     },
     "status": "built",
     "written_prompt_matches_provenance": true
