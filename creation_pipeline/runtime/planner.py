@@ -817,6 +817,51 @@ def patch_protocol(locked):
                    'that did not come from this draft must stay.')
 
 
+def policy_for(base_kind):
+    """The exact policy text sent for a round: 'none' (full plan) or a repair round."""
+    if base_kind == 'none':
+        return POLICY
+    return POLICY + patch_protocol(base_kind == 'accepted_plan')
+
+
+def build_prompt(material, base_kind):
+    """The exact prompt bytes sent for one planning round.
+
+    Production and the offline provenance check both call this, so what is recorded
+    is what is sent, never a hand-written copy of it.
+    """
+    return policy_for(base_kind) + "\nINPUT\n" + json.dumps(material, ensure_ascii=False)
+
+
+def schema_for(base_kind):
+    """The answer schema sent for a round: a full plan, or bounded patch operations."""
+    return PLAN_SCHEMA if base_kind == 'none' else PATCH_SCHEMA
+
+
+def canonical_schema(schema):
+    return json.dumps(schema, ensure_ascii=False, sort_keys=True)
+
+
+def provenance(material, base_kind):
+    """Identify the sent policy, schema and prompt without sending them."""
+    prompt = build_prompt(material, base_kind)
+    schema = schema_for(base_kind)
+    text = canonical_schema(schema)
+    return {
+        'base_kind': base_kind,
+        'prompt_sha256': hashlib.sha256(prompt.encode('utf-8')).hexdigest(),
+        'prompt_bytes': len(prompt.encode('utf-8')),
+        'schema_sha256': hashlib.sha256(text.encode('utf-8')).hexdigest(),
+        'schema_bytes': len(text.encode('utf-8')),
+        'policy_sha256': hashlib.sha256(policy_for(base_kind).encode('utf-8')).hexdigest(),
+        'policy_bytes': len(policy_for(base_kind).encode('utf-8')),
+        'acceptance_spec_sha256': hashlib.sha256(ACCEPTANCE_SPEC.encode('utf-8')).hexdigest(),
+        'acceptance_spec_bytes': len(ACCEPTANCE_SPEC.encode('utf-8')),
+        'input_contract_spec_sha256': hashlib.sha256(INPUT_CONTRACT_SPEC.encode('utf-8')).hexdigest(),
+        'generated_by': 'creation_pipeline.runtime.planner current code (no frozen copy)',
+    }
+
+
 def plan(source, config, audit, opts, deadline, feedback=None, previous=None, call_guard=None, required=None):
     """Persist every prompt/response; demand-read additional files within budget."""
     audit = Path(audit)
@@ -872,22 +917,26 @@ def plan(source, config, audit, opts, deadline, feedback=None, previous=None, ca
         not_read=sorted(set(index['files'])-set(read_files))
         write(audit/'materials.json',{'read':list(read_files),'not_read':not_read,'omissions':omitted,'used_chars':used})
         diagnostic={k:v for k,v in (feedback or {}).items() if k not in {'rejected_plan','read_files','source_fingerprint'}}
+        base_kind = ('accepted_plan' if base is previous and previous is not None
+                     else 'rejected_candidate' if base else 'none')
         material = {"index": compact_index, "materials": read_files, "not_read_count":len(not_read),
                     "omissions":{k:v for k,v in omitted.items() if k in requested},'omission_counts':dict(Counter(omitted.values())),
                     'read_budget':{'used_chars':used,'max_chars':opts['context_chars']}, "entry_hint": config.get("script"),
                     "user_constraints": config.get("constraints", []),
                     "execution_budget": {k: opts[k] for k in ("test_seconds", "document_seconds", "total_seconds")},
-                    "previous_plan": base, 'base_kind':'accepted_plan' if base is previous and previous is not None else 'rejected_candidate' if base else 'none',
+                    "previous_plan": base, 'base_kind': base_kind,
                     "diagnostic": diagnostic,
                     "read_rounds_remaining": None if opts["max_read_rounds"] is None else opts["max_read_rounds"] - number - 1}
         # Feedback is bounded separately and its full version is retained in attempt logs.
-        policy=POLICY
-        if base is not None:
-            policy += patch_protocol(previous is not None)
-        prompt = policy + "\nINPUT\n" + json.dumps(material, ensure_ascii=False)
+        prompt = build_prompt(material, base_kind)
+        sent = provenance(material, base_kind)
         if opts["context_chars"] is not None and len(prompt) > opts["context_chars"] * 4:
             raise BudgetExceeded("Total prompt budget exceeded (materials/index/repair context); narrow source root")
         (audit / f"prompt-{number}.txt").write_text(redact(prompt), encoding="utf-8")
+        # The sent bytes are identified next to the prompt that was actually written,
+        # so a run's evidence can be checked against the code that produced it instead
+        # of against a separately frozen copy.
+        write(audit / f"prompt-provenance-{number}.json", sent)
         try:
             if call_guard is not None:
                 call_guard()
@@ -896,7 +945,7 @@ def plan(source, config, audit, opts, deadline, feedback=None, previous=None, ca
             remaining = float("inf") if deadline is None else deadline - time.monotonic()
             if remaining <= 0:
                 raise BudgetExceeded("Total planning/build time budget exhausted before model call")
-            answer, receipt = model_call.call(prompt, PATCH_SCHEMA if base is not None else PLAN_SCHEMA, backend_model(opts),
+            answer, receipt = model_call.call(prompt, schema_for(base_kind), backend_model(opts),
                                              timeout=min(opts["model_timeout"], remaining),
                                              progress_timeout=opts["progress_timeout"],
                                              progress_watch=opts["progress_watch"],

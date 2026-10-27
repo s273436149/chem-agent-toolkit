@@ -270,6 +270,9 @@ python validation/deepseek-api/verify_planner.py check
 # every prompt surface states the contract the validators enforce (no request)
 python validation/deepseek-api/verify_prompt_contract.py
 
+# acceptance path: current-code prompt/schema identity, recorded (no request)
+python validation/deepseek-api/verify_acceptance_prompt.py freeze   # or check
+
 # saved original RECAP case: integrity + gate rehearsal, no request
 python validation/deepseek-api/verify_original_case.py check
 
@@ -280,6 +283,28 @@ python validation/deepseek-api/verify_original_case.py run --timeout 600
 
 A live `run` needs `DEEPSEEK_API_KEY` and a model in the repository `.env` (or the
 environment). Without them it fails closed.
+
+### What the acceptance batch actually sends
+
+The formal batch never reads `validation/deepseek-api/frozen/`; that directory is an
+offline diagnostic for `verify_planner.py` only. Every planning round builds its prompt
+through `planner.build_prompt()` and its answer schema through `planner.schema_for()`
+from the live module (POLICY + the shared invalid-input block, and the schema whose
+`acceptance_json` description is the current `ACCEPTANCE_SPEC`), then records the
+identity next to the prompt:
+
+```
+<audit>/prompt-0.txt              # the exact (redacted) prompt
+<audit>/prompt-provenance-0.json  # prompt/schema/policy/description sha256 + bytes
+<audit>/receipt-0.json            # backend receipt: prompt_sha256, prompt_bytes, schema_sha256
+```
+
+Both backends record the same identity: the Codex CLI receipt carries `prompt_sha256`,
+`prompt_bytes` and `schema_sha256`, and the DeepSeek receipt additionally records
+`messages_sha256` of the final request body. `validation/deepseek-api/prompt-provenance.json`
+pins the current-code identity offline (including the saved RECAP case's round-0 prompt
+built by running the real planner up to — never into — the model call), so a stale
+prompt/schema can be detected before any request is spent.
 
 The full pipeline acceptance (discovery → authoring → review → Docker build →
 business acceptance) is started with the acceptance configuration:

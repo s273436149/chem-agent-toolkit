@@ -134,6 +134,16 @@ patch-rejection-0.json: Patched plan schema error: {'args': [...], ...} is not o
      测试套件（`test_prompt_contract`），规则与提示脱节即失败。
      代价是提示变大：POLICY 9.5 KB → 12.1 KB，schema description 3.9 KB → 5.7 KB，
      frozen prompt 12,291 B → **14,814 B**（已重新冻结）。
+   * **正式验收路径只用当前代码生成 prompt/schema，并记录最终发送指纹**：生产代码不读取
+     `validation/deepseek-api/frozen/`（审计断言 0 处引用），每轮提示由
+     `planner.build_prompt()`、答案 schema 由 `planner.schema_for()` 从当前模块对象生成；
+     每轮在审计目录写入 `prompt-<n>.txt` 与 `prompt-provenance-<n>.json`（prompt/schema/
+     policy/acceptance description 的 sha256 与字节数），两种后端的 receipt 都记录
+     `prompt_sha256`/`prompt_bytes`/`schema_sha256`（DeepSeek 另记请求体 `messages_sha256`）。
+     `validation/deepseek-api/prompt-provenance.json` 离线固化当前代码身份，并用**真实
+     planner** 跑到首次模型调用之前，复现已保存 RECAP 案例的 round-0 提示
+     （`95f48639…`，schema `141f8b01…`）与其冻结夹具（`50460c7d…`）不同，证明验收不依赖该夹具。
+     校验：`verify_acceptance_prompt.py check`、`tests/pipeline/test_prompt_provenance.py`。
    * 这些改动没有放宽任何验收门禁，但**也没有被真实批次验证**。RECAP 历史已接受计划仍是
      `required`（引用交付 `entry/skill.py` 的空白校验），`verify_original_case check`
      显示它在未放宽的门禁下通过（8 个用例）；因此该案例不会、也不应靠新增
@@ -155,7 +165,7 @@ cd E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi
 $env:PATH = 'C:\Users\27343\AppData\Local\OpenAI\Codex\bin\2993767bd1dfb009;' + $env:PATH
 python -m creation_pipeline build validation/deepseek-api/acceptance-normal-input.json `
   --state-dir <new>\state --library-dir <new>\library
-python -m unittest discover -s tests -q      # 485 OK (3 skipped)
+python -m unittest discover -s tests -q      # 490 OK (3 skipped)
 ```
 
 **最终 SKILL.md**：未形成合格交付（候选在 `library/candidates/`）。

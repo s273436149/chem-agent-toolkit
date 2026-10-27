@@ -415,8 +415,12 @@ def call(prompt, schema, model, timeout=900, audit_dir=None, progress_timeout=PR
         # Answered, but violated the no-tool / JSON-answer contract. That is a
         # model-output defect, never an input problem.
         raise ModelOutputInvalid(error)
+    schema_sha256 = hashlib.sha256(json.dumps(schema, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
     receipt={'model':model,'usage':usage,'tool_events':tools,'stream_notices':notices,'elapsed_seconds':round(time.monotonic()-started,3),
+             'backend':'codex_cli',
              'prompt_sha256':hashlib.sha256(prompt.encode()).hexdigest(),
+             'prompt_bytes':len(prompt.encode()),
+             'schema_sha256':schema_sha256,
              'response_sha256':hashlib.sha256(json.dumps(answer,sort_keys=True).encode()).hexdigest()}
     return answer,receipt
 

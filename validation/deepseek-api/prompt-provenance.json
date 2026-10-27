@@ -1,0 +1,78 @@
+{
+  "code": {
+    "acceptance_spec_bytes": 5731,
+    "acceptance_spec_sha256": "453d0c0c9af563ac02e7b32b957c4fb438c20e855ae9f9f13bf73bf0179e9af9",
+    "input_contract_spec_sha256": "2403220c13052060553007d909a03ff1869c10b7a41248bbf9b922a52f4dce34",
+    "patch_schema_sha256": "0ac6d7fa716f9b93debb0389cd672ed0876cde5e29221a10e3836357afe06d74",
+    "plan_schema_sha256": "141f8b010ef82bc921e1e2989444632f25d5ab304148e042059d67eb3e0cbbfc",
+    "policy_bytes": 12055,
+    "policy_sha256": "cd67ff2bf5a6ec0d4409cbd9fee8392cebf5f82d2002072e9113f220a2661843"
+  },
+  "frozen_fixture": {
+    "prompt_bytes": 14814,
+    "prompt_sha256": "50460c7dc121a55114249cb0346345aa817bb43f6c528d490050d57708a6ddb2",
+    "schema_sha256": "141f8b010ef82bc921e1e2989444632f25d5ab304148e042059d67eb3e0cbbfc",
+    "status": "frozen",
+    "used_by": "validation/deepseek-api/verify_planner.py only"
+  },
+  "generated_by": "validation/deepseek-api/verify_acceptance_prompt.py freeze",
+  "note": "These are the prompt/schema identities the current code produces. The formal acceptance batch builds the same bytes at call time and records them per planning round as <audit>/prompt-provenance-<n>.json; the small frozen fixture under frozen/ is a separate offline diagnostic and is never read by production.",
+  "rounds": {
+    "accepted_plan": {
+      "acceptance_spec_bytes": 5731,
+      "acceptance_spec_sha256": "453d0c0c9af563ac02e7b32b957c4fb438c20e855ae9f9f13bf73bf0179e9af9",
+      "base_kind": "accepted_plan",
+      "generated_by": "creation_pipeline.runtime.planner current code (no frozen copy)",
+      "input_contract_spec_sha256": "2403220c13052060553007d909a03ff1869c10b7a41248bbf9b922a52f4dce34",
+      "policy_bytes": 12927,
+      "policy_sha256": "4b94996ffffbc30e2a1fea32f97827fb2b566e182dc6584184e9f1622808c5df",
+      "prompt_bytes": 13396,
+      "prompt_sha256": "e41e2e2d2003db525a06417450c1085d7241ce88659d73e293d355d5752ac06d",
+      "schema_bytes": 6407,
+      "schema_sha256": "0ac6d7fa716f9b93debb0389cd672ed0876cde5e29221a10e3836357afe06d74"
+    },
+    "none": {
+      "acceptance_spec_bytes": 5731,
+      "acceptance_spec_sha256": "453d0c0c9af563ac02e7b32b957c4fb438c20e855ae9f9f13bf73bf0179e9af9",
+      "base_kind": "none",
+      "generated_by": "creation_pipeline.runtime.planner current code (no frozen copy)",
+      "input_contract_spec_sha256": "2403220c13052060553007d909a03ff1869c10b7a41248bbf9b922a52f4dce34",
+      "policy_bytes": 12055,
+      "policy_sha256": "cd67ff2bf5a6ec0d4409cbd9fee8392cebf5f82d2002072e9113f220a2661843",
+      "prompt_bytes": 12524,
+      "prompt_sha256": "015a8d11104c1414deec11738dfae9ed9d55eb762b5a0e6bad4483030ad242c1",
+      "schema_bytes": 10437,
+      "schema_sha256": "141f8b010ef82bc921e1e2989444632f25d5ab304148e042059d67eb3e0cbbfc"
+    },
+    "rejected_candidate": {
+      "acceptance_spec_bytes": 5731,
+      "acceptance_spec_sha256": "453d0c0c9af563ac02e7b32b957c4fb438c20e855ae9f9f13bf73bf0179e9af9",
+      "base_kind": "rejected_candidate",
+      "generated_by": "creation_pipeline.runtime.planner current code (no frozen copy)",
+      "input_contract_spec_sha256": "2403220c13052060553007d909a03ff1869c10b7a41248bbf9b922a52f4dce34",
+      "policy_bytes": 13170,
+      "policy_sha256": "c1b9ef48a97e2e1578d00cf0e893de95bfff7ec9e20400a3af0b143b13dc4820",
+      "prompt_bytes": 13639,
+      "prompt_sha256": "19082ea54147c023b7db8f5ceefab78a93eff90bd59f6f4e2d4817b544875457",
+      "schema_bytes": 6407,
+      "schema_sha256": "0ac6d7fa716f9b93debb0389cd672ed0876cde5e29221a10e3836357afe06d74"
+    }
+  },
+  "saved_case": {
+    "provenance": {
+      "acceptance_spec_bytes": 5731,
+      "acceptance_spec_sha256": "453d0c0c9af563ac02e7b32b957c4fb438c20e855ae9f9f13bf73bf0179e9af9",
+      "base_kind": "none",
+      "generated_by": "creation_pipeline.runtime.planner current code (no frozen copy)",
+      "input_contract_spec_sha256": "2403220c13052060553007d909a03ff1869c10b7a41248bbf9b922a52f4dce34",
+      "policy_bytes": 12055,
+      "policy_sha256": "cd67ff2bf5a6ec0d4409cbd9fee8392cebf5f82d2002072e9113f220a2661843",
+      "prompt_bytes": 47779,
+      "prompt_sha256": "3a62128ee8f559f43d1eedc8b353d00859fbbcf5873c2dd44cad365fb47c9f8a",
+      "schema_bytes": 10437,
+      "schema_sha256": "141f8b010ef82bc921e1e2989444632f25d5ab304148e042059d67eb3e0cbbfc"
+    },
+    "status": "built",
+    "written_prompt_matches_provenance": true
+  }
+}
