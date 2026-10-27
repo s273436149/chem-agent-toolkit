@@ -46,7 +46,14 @@ def requirement(proposal, entries, review):
             raise ValueError("Requirement needs a reason and exact source citations")
         by_id = {e["id"]: e for e in entries}
         for citation in proposal["citations"]:
-            entry = by_id[citation["source_id"]]
+            source_id = citation.get("source_id")
+            if source_id not in by_id:
+                # An evidence locator (e1) is not a source id; say so instead of
+                # failing with a bare KeyError that hides the fix (run 22).
+                raise ValueError("Requirement cites unknown source id %r; citations use the "
+                                 "registered source ids %s, not evidence locators"
+                                 % (source_id, sorted(by_id)))
+            entry = by_id[source_id]
             if citation["path"] not in {f["path"] for f in entry["inventory"]}:
                 raise ValueError("Requirement cites an unregistered file")
             root = Path(entry["path"])

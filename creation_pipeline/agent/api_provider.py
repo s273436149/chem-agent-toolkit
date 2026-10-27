@@ -63,7 +63,9 @@ AUTHOR_INSTRUCTIONS = (
     'runtime_requirement is an OBJECT {status: required|not_required|unknown, reason, '
     'citations:[{source_id, path, quote}]}; every quote must be copied verbatim from the '
     'source text below and a required status needs at least one citation. '
-    'Source quotes you cite must be copied verbatim from the source text below.\n')
+    'citations[].source_id is the registered SOURCE id (for example recap or license) and '
+    'citations[].path is that source\'s snapshot path (for example document.py); the eN '
+    'evidence locators are only for evidence references and claims.\n')
 PROVIDER_INSTRUCTIONS = {
     'discovery': ('\nAPI PROVIDER MODE. You have no tools and cannot read files: the resource '
                   'workspace, the registered evidence locators and the supplied source texts are '

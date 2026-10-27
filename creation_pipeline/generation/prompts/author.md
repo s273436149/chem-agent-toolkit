@@ -16,7 +16,10 @@ block in SKILL.md. Any additional illustrative snippet must use a non-python fen
 entry declaration are refused, and an interactive prompt (>>>) or an indented fence is
 not executable.
 Record metadata.runtime_requirement with status required/not_required/unknown, a reason,
-and citations [{source_id,path,quote}] quoting the registered original source exactly.
+and citations [{source_id,path,quote}] quoting the registered original source exactly:
+source_id is the source id (for example recap), path is that source's snapshot path
+(for example document.py) and quote is verbatim source text. eN evidence locators are
+for evidence references and claims only; they are not source ids.
 Use not_required only for an explicitly supported non-executable capability, never
 because dependencies are unavailable or no tests were written. Independent review
 confirms this declaration. configured_requirement, if supplied, is reviewed as well.
