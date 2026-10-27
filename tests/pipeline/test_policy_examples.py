@@ -4,6 +4,7 @@ The examples are rendered by ``planner.json_text`` (json.dumps) instead of being
 hand-written, because hand-written multi-level escaping produced examples that were
 themselves invalid JSON. These tests fail if an example drifts from the gate.
 """
+import copy
 import json
 import tempfile
 import unittest
@@ -30,15 +31,20 @@ class PolicyExampleTests(unittest.TestCase):
             with self.subTest(name):
                 self.assertEqual(json.loads(planner.json_text(example)), example)
 
-    def test_case_json_object_is_rejected_and_text_is_accepted(self):
+    def test_case_json_accepts_both_encodings(self):
+        # The plan schema accepts text or the object; the object is normalised into
+        # text before the plan checks, and the text form decodes to the same case.
         wrong = EX['case_json_object']
         right = EX['case_json_text']
-        with self.assertRaises(jsonschema.ValidationError):
-            jsonschema.validate(wrong, {'type': 'object', 'properties': {'case_json': CASE_SCHEMA},
+        for value, name in ((wrong, 'object'), (right, 'text')):
+            jsonschema.validate(value, {'type': 'object', 'properties': {'case_json': CASE_SCHEMA},
                                         'required': ['case_json']})
-        jsonschema.validate(right, {'type': 'object', 'properties': {'case_json': CASE_SCHEMA},
-                                    'required': ['case_json']})
-        # The text form decodes to a case the fixture gate accepts.
+        normalised = planner.normalize_text_fields(
+            {'acceptance_json': {'purposes': ['report']},
+             'tests': [copy.deepcopy(wrong)]})
+        self.assertEqual(json.loads(normalised['tests'][0]['case_json']),
+                         {'args': ['CCCOCCC'], 'stdout_equals': '[]'})
+        self.assertIsInstance(normalised['acceptance_json'], str)
         planner.check_case(json.loads(right['case_json']))
 
     def test_the_nested_json_text_decodes_twice(self):
