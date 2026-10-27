@@ -48,6 +48,24 @@ or scientific limitations remain in `unresolved`/`unverified_behavior`; they are
 not confused with missing execution resources. Source citations constrain model
 reasoning but substring verification is not proof of all semantic judgments.
 
+Invalid-input handling is classified per operation with three states, and the
+requirement is kept separate from its verification:
+
+| state | when | obligation |
+| --- | --- | --- |
+| `required` | the caller, the delivered interface (a wrapper's own error branch counts) or the source states a constraint | a named check and an actual rejection case that passes |
+| `none_documented` | no examined material and no promise declares a contract | records `reason`, `scope`, `limitation`, `checked` materials with fingerprints and an independent confirmation; reported as a validation gap |
+| `not_applicable` | the operation has no caller-supplied business input | normal functional verification only |
+
+The policy's `invalid_input` is the strongest declared state. Coverage reports
+`coverage_complete` (were the applicable declared checks covered), `validation_gaps`
+(which behavior has no contract basis) and `blockers` (a stated obligation without a
+verifiable contract) separately. A recorded gap never replaces a stated obligation:
+`none_documented` cannot waive a requirement expressed by the caller, the delivered
+interface or an author-declared rejection check, and it needs an independent review
+artifact that `preparation.confirm_gaps` binds; without one the classification is
+only a declaration and runtime preparation blocks with `invalid_input_review_missing`.
+
 The old planner's source inventory, demand reads, plan/patch validation and
 acceptance-contract checks are adapted internally. Tests must invoke the actual
 delivered entry and cover declared operations. Environment changes cannot remove

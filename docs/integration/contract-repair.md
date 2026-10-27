@@ -112,6 +112,43 @@ result.json。因此程序可直接证明前两个内部矛盾，不能跨文件
 这三项都只改变规划协议与报错表达，没有放宽任何验收门禁；补丁后仍要过完整
 `PLAN_SCHEMA` 校验和原有 `validate_plan` 语义门禁。
 
+## 非法输入：三态分类与"要求"和"已验证"分离（仅离线改动，0 次真实模型调用）
+
+原来的 `invalid_input` 只有 `required`/`not_applicable` 两态，且只有全局一个值：
+上游没写拒绝规则时，模型只能在"编造拒绝预期"和"声称不适用"之间二选一。现在：
+
+| 状态 | 使用条件 | 验收义务 |
+| --- | --- | --- |
+| `required` | 用户、交付接口（wrapper 自己的错误分支也算）或来源明确规定 | 必须有具名 check 与**真实**拒绝用例并通过 |
+| `none_documented` | 已检查材料与任何承诺都未给出契约 | 记录 `reason`/`scope`/`limitation`/`checked` 材料指纹/独立确认；作为 `validation_gaps` 报告 |
+| `not_applicable` | 该操作没有调用者可提供的业务输入 | 仅需正常功能验证 |
+
+判定按 operation 进行（无 operations 时按整个工具），策略级 `invalid_input` 取最强状态。
+
+1. **判断依据不只上游源码**：`preparation.input_anchors` 从**已冻结**数据取锚点——
+   作者/配置/审阅声明的拒绝检查（`expected_exit != 0`）、独立审阅过的执行要求引文、
+   调用方 `requirements` 文本。命中即 `forbids_none_documented`，此时有调用者输入的操作
+   只能是 `required`；`required` 的引用可以指向**交付的 entry 文件**，上游沉默不能豁免
+   交付自己的承诺。
+2. **`none_documented` 不要求伪造"证明不存在"的引文**：它不要求 `source_quote`，而是要求
+   `checked:[{source_path, sha256}]`（逐个校验读取与指纹）、`scope`、`reason`、`limitation`
+   和绑定到该材料集的独立确认 `review:{status, reviewer, materials_sha256}`；`context`
+   引文只能作上下文，悬空或无关引文直接拒绝。`preparation.confirm_gaps` 还要求存在
+   独立审阅产物，否则 `invalid_input_review_missing` 阻塞——普通创建路径拿不到该确认，
+   所以它**不能**被用来把一个真实义务洗成"无契约"。
+3. **"规定的检查已覆盖"与"业务要求已满足"分开**：`acceptance_coverage` 现在同时输出
+   `coverage_complete`、`validation_gaps`、`blockers`；`complete = coverage_complete 且
+   无 blockers`。`none_documented` 只免除"凭空编造负向预期"，会显示为验证缺口；用户/交付
+   要求了却无法建立可验证契约时进入 `blockers` 并阻塞，不允许用缺口替代。
+4. **修复轮不得随意降级**：锁定计划仍完全不能改 `acceptance_json`；被拒草稿的降级必须带上
+   上述记录字段，否则 `patch_plan` 直接拒绝（"cannot downgrade … without recorded evidence"），
+   真实降级写入 `scope-delta-*/input_states`，外部要求与已批准契约只能走正式变更流程。
+5. **RECAP 案例**：历史已接受的计划是 `required`（引用交付 `entry/skill.py` 的
+   `if len(sys.argv) > 2 or not smiles.strip():`，check `nonempty_text`，拒绝用例退出码 1），
+   `verify_original_case check` 仍显示该计划在**未放宽**的门禁下通过。因此 RECAP 不靠新增
+   `none_documented` 过关；没有用户输入的固定示例程序则可以正当声明 `not_applicable`，
+   不必凭空承担不存在的输入接口。
+
 ## 自动修正边界
 
 提案绑定原修订、acceptance/source 指纹、逐用例旧值/新值、来源路径与精确引文，

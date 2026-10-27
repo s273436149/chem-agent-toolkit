@@ -15,6 +15,93 @@ class ContractConflict(ValueError):
         super().__init__('Inconsistent acceptance contract: ' + json.dumps(conflicts, ensure_ascii=False))
 
 
+# What is promised about invalid input is separate from whether that promise was
+# verified. The three states have different obligations:
+#   required          the caller, the delivered interface or the source states a rule
+#   none_documented   the examined materials declare none, and nobody promised one
+#   not_applicable    the operation has no caller-supplied business input at all
+INPUT_STATES = ('required', 'none_documented', 'not_applicable')
+AGGREGATE = {'required': 3, 'none_documented': 2, 'not_applicable': 1}
+
+
+def materials_digest(checked):
+    """Identity of the exact materials a classification claims to have examined."""
+    from creation_pipeline.contracts import fingerprint
+    return fingerprint([{'source_path': item['source_path'], 'sha256': item['sha256']}
+                        for item in checked])
+
+
+def input_contract(record, index, source, where='Input contract'):
+    """Validate one invalid-input classification and return its state.
+
+    ``none_documented`` is a recorded absence, never an invented proof: it names the
+    examined materials by fingerprint, the examined scope, the reason and the residual
+    limitation, and it is bound to an independent confirmation. A quotation may be
+    attached as context but never replaces that record.
+    """
+    if not isinstance(record, dict):
+        raise ValueError(where + ': invalid input classification must be an object')
+    status = record.get('status')
+    if status not in INPUT_STATES:
+        raise ValueError(where + ': invalid input status must be one of ' + ', '.join(INPUT_STATES))
+    if status == 'required':
+        if not isinstance(record.get('constraint'), str) or not record['constraint'].strip():
+            raise ValueError(where + ': required input policy must identify the input constraint')
+        return status
+    if status == 'not_applicable':
+        if not isinstance(record.get('reason'), str) or not record['reason'].strip():
+            raise ValueError(where + ': not_applicable needs a reason why no caller input exists')
+        return status
+    for field in ('reason', 'scope', 'limitation'):
+        if not isinstance(record.get(field), str) or not record[field].strip():
+            raise ValueError(where + ': none_documented needs a nonempty ' + field)
+    checked = record.get('checked')
+    if not isinstance(checked, list) or not checked:
+        raise ValueError(where + ': none_documented must list the materials it examined')
+    for item in checked:
+        if not isinstance(item, dict) or set(item) != {'source_path', 'sha256'}:
+            raise ValueError(where + ': checked materials are exactly {source_path, sha256}')
+        entry = index.get('files', {}).get(item['source_path'])
+        if item['source_path'] not in index.get('read_files', index.get('files', {})):
+            raise ValueError(where + ': checked material was never read: ' + str(item['source_path']))
+        if not entry or entry.get('sha256') != item['sha256']:
+            raise ValueError(where + ': checked material fingerprint does not match: ' + str(item['source_path']))
+    if 'context' in record and not grounded(record['context'], index, source):
+        raise ValueError(where + ': a context quotation must be grounded, or omitted; it never proves absence')
+    review = record.get('review')
+    if (not isinstance(review, dict) or review.get('status') != 'confirmed'
+            or not isinstance(review.get('reviewer'), str) or not review['reviewer'].strip()):
+        raise ValueError(where + ': none_documented needs an independent confirmation of this classification')
+    if review.get('materials_sha256') != materials_digest(checked):
+        raise ValueError(where + ': the independent confirmation is not bound to the examined materials')
+    return status
+
+
+def _classification(policy, index, source):
+    """Resolve the authoritative classification, and keep the legacy field honest."""
+    operations = policy.get('operations', [])
+    if not isinstance(operations, list) or not all(isinstance(o, dict) for o in operations):
+        raise ValueError('Acceptance operations must be objects')
+    if operations:
+        declared = ['input_contract' in operation for operation in operations]
+        if any(declared) and not all(declared):
+            raise ValueError('Every operation must classify its own invalid-input contract')
+        if all(declared) and declared:
+            states = [input_contract(operation['input_contract'], index, source,
+                                     'Operation ' + str(operation.get('id'))) for operation in operations]
+            aggregate = max(states, key=lambda state: AGGREGATE[state])
+            if policy.get('invalid_input') != aggregate:
+                raise ValueError('invalid_input must equal the per-operation aggregate: ' + aggregate)
+            return 'operations', aggregate
+        return 'legacy', policy.get('invalid_input')
+    if 'input_contract' in policy:
+        status = input_contract(policy['input_contract'], index, source)
+        if policy.get('invalid_input') != status:
+            raise ValueError('invalid_input must equal the declared input contract: ' + status)
+        return 'declared', status
+    return 'legacy', policy.get('invalid_input')
+
+
 def consistency(cases):
     """Prove contradictions only within one invocation and one output channel.
 
@@ -73,10 +160,19 @@ def contracts(plan, cases, index, source, *, check_consistency=True):
     if policy:
         if not policy.get('purposes') or any(p not in {'computation', 'operation', 'report'} for p in policy['purposes']):
             raise ValueError('Acceptance scope must declare its required purposes')
-        if policy.get('invalid_input') not in {'required', 'not_applicable'} or not policy.get('scope') or not grounded(policy, index, source):
+        mode, aggregate = _classification(policy, index, source)
+        if not isinstance(policy.get('scope'), str) or not policy['scope'].strip():
+            raise ValueError('Acceptance scope must state which input forms are promised')
+        if mode == 'legacy' and (policy.get('invalid_input') not in {'required', 'not_applicable'}
+                                 or not grounded(policy, index, source)):
             raise ValueError('Input policy requires scope and an exact quotation from read source')
-        if policy['invalid_input'] == 'required' and not policy.get('constraint'):
-            raise ValueError('Required input policy must identify the input constraint')
+        if aggregate == 'required' and not grounded(policy, index, source) and not (
+                isinstance(policy.get('input_contract'), dict) and grounded(policy['input_contract'], index, source)):
+            # A required classification still needs a citable basis: the delivered
+            # interface or the source that states the rule.
+            raise ValueError('Required input classification needs an exact quotation from read source or the delivered entry')
+        if mode != 'legacy' and aggregate != 'required' and policy.get('checks'):
+            raise ValueError('Input checks describe a constraint, so at least one operation must be required')
         for check in policy.get('checks', []):
             if not grounded(check, index, source) or not check.get('id') or check.get('channel') not in {'args', 'input_files'}:
                 raise ValueError('Input checks require grounded id/channel/key/pattern')
@@ -107,7 +203,16 @@ def contracts(plan, cases, index, source, *, check_consistency=True):
                         or item['equals'] not in operation['source_quote']):
                     raise ValueError('Operation selector must match a literal documented invocation token')
             selected = operation.get('checks')
-            if not isinstance(selected, list) or not selected or not set(selected) <= checks.keys():
+            state = (operation.get('input_contract') or {}).get('status')
+            if state is not None and state != 'required' and selected:
+                raise ValueError('Operation checks describe a constraint, so that operation must be required')
+            if state == 'not_applicable':
+                # Nothing to check when the operation has no caller-supplied input.
+                if selected is None:
+                    selected = operation['checks'] = []
+                if not isinstance(selected, list) or not set(selected) <= checks.keys():
+                    raise ValueError('Operation checks must name declared input checks')
+            elif not isinstance(selected, list) or not selected or not set(selected) <= checks.keys():
                 raise ValueError('Each input operation must apply named input checks; no per-case exemptions')
             if not operation.get('purposes') or not set(operation['purposes']) <= set(policy['purposes']):
                 raise ValueError('Operation business purposes must belong to declared scope')

@@ -454,6 +454,9 @@ def build(config_path=None, state_root=None, *, plan_only=False, plan_path=None,
                     from creation_pipeline.runtime.local import LocalExecutor
                     from creation_pipeline.runtime.service import execute_prepared
                     runtime_spec = copy.deepcopy(runtime_override if runtime_override is not None else runtime_spec_for(config, name))
+                    # The caller's own wording is an obligation source for the
+                    # invalid-input classification, not only the upstream source.
+                    runtime_spec.setdefault('requirements', [config.get('prompt', '')] + list(config.get('constraints') or []))
                     runtime_spec.setdefault("options", {}).setdefault("model", session.model_name)
                     runtime_spec["options"].setdefault("transport", config["model"].get("transport", "default"))
                     runtime_spec["options"].setdefault("progress_watch", config["execution"].get("progress_watch", "terminate"))

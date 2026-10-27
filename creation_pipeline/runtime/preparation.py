@@ -20,13 +20,16 @@ class RuntimeBlocked(ValueError):
 
 
 def validate_spec(spec):
-    if not isinstance(spec, dict) or set(spec) - {'binding', 'plan', 'options', 'resource_refs', 'constraints', 'locked_cases', 'previous_plan', 'feedback'}:
+    if not isinstance(spec, dict) or set(spec) - {'binding', 'plan', 'options', 'resource_refs', 'constraints',
+                                                  'requirements', 'locked_cases', 'previous_plan', 'feedback'}:
         raise ValueError('Unsupported runtime preparation settings')
     for key in ('binding', 'plan', 'options', 'resource_refs'):
         if key in spec and not isinstance(spec[key], dict):
             raise ValueError('runtime.' + key + ' must be an object')
     if not isinstance(spec.get('constraints', []), list) or any(not isinstance(s, str) for s in spec.get('constraints', [])):
         raise ValueError('Runtime constraints must be text items')
+    if not isinstance(spec.get('requirements', []), list) or any(not isinstance(s, str) for s in spec.get('requirements', [])):
+        raise ValueError('Runtime requirements must be text items')
     for ref in spec.get('resource_refs', {}).values():
         if not isinstance(ref, dict) or set(ref) - {'path', 'sha256', 'env'} or any(not isinstance(v, str) for v in ref.values()):
             raise ValueError('Resource references support only path/sha256 or environment-variable names; no credential values')
@@ -79,6 +82,86 @@ def bind(package, sources, proposal=None, entry=None):
         raise RuntimeBlocked("binding_unresolved", str(exc), "binding") from exc
 
 
+# Wording that states an invalid-input obligation. It is a deterministic anchor, not a
+# semantic reading: a match only ever makes the gate stricter.
+REQUIRED_INPUT_PHRASES = re.compile(
+    r'(?i)\binvalid[ -](?:input|argument|value)s?\b|\breject(?:s|ed|ion)?\b|\berror handl\w*\b|'
+    r'\binput validation\b|\bvalidation error\b|非法输入|错误处理')
+
+
+def input_anchors(record, requirements=()):
+    """Obligations a ``none_documented`` classification may not waive.
+
+    Only frozen or caller-declared facts are consulted: the author's own rejection
+    checks, the independently reviewed execution requirement, and the caller's stated
+    requirements. The creation prompt is not an anchor source on its own.
+    """
+    delivery = record.get('delivery') or {}
+    payload = (delivery.get('inputs', {}).get('acceptance') or {}).get('payload') or {}
+    definitions = payload.get('author_tests', payload) if isinstance(payload, dict) else {}
+    rejected = sorted(
+        str(test.get('name')) for origin in ('configured', 'generated', 'reviewed')
+        for test in (definitions.get(origin) or []) if isinstance(test, dict)
+        if type(test.get('expected_exit', 0)) is int and test.get('expected_exit') != 0)
+    required = (delivery.get('inputs', {}).get('requirement') or {})
+    texts = [required.get('reason') or '', *[str(item) for item in requirements]]
+    texts += [citation.get('quote') or '' for citation in required.get('citations') or []
+              if isinstance(citation, dict)]
+    matches = sorted({match.group(0).lower() for text in texts if isinstance(text, str)
+                      for match in REQUIRED_INPUT_PHRASES.finditer(text)})
+    basis = []
+    if rejected:
+        basis.append('the delivered interface declares rejection checks: ' + ', '.join(rejected))
+    if matches:
+        basis.append('the stated requirement asks for invalid-input verification: ' + ', '.join(matches))
+    return {'rejection_checks': rejected, 'requirement_matches': matches,
+            'forbids_none_documented': bool(rejected or matches), 'basis': '; '.join(basis)}
+
+
+def merged_anchors(record, requirements=()):
+    """Anchors only ever accumulate: a repair cannot forget an earlier obligation."""
+    fresh = input_anchors(record, requirements)
+    previous = ((record.get('delivery') or {}).get('inputs', {}).get('acceptance') or {}).get('payload') or {}
+    old = previous.get('input_anchors') if isinstance(previous, dict) else None
+    if not isinstance(old, dict):
+        return fresh
+    rejected = sorted(set(fresh['rejection_checks']) | set(old.get('rejection_checks') or []))
+    matches = sorted(set(fresh['requirement_matches']) | set(old.get('requirement_matches') or []))
+    basis = '; '.join(item for item in (old.get('basis'), fresh['basis']) if item)
+    return {'rejection_checks': rejected, 'requirement_matches': matches,
+            'forbids_none_documented': bool(rejected or matches or old.get('forbids_none_documented')),
+            'basis': basis}
+
+
+def none_documented_units(policy):
+    """Units that classify invalid input as an undocumented absence."""
+    if not isinstance(policy, dict):
+        return []
+    operations = policy.get('operations') or []
+    if operations and all(isinstance(o, dict) and 'input_contract' in o for o in operations):
+        units = [(o.get('id'), o['input_contract']) for o in operations]
+    elif isinstance(policy.get('input_contract'), dict):
+        units = [('tool', policy['input_contract'])]
+    else:
+        return []
+    return [str(name) for name, contract in units
+            if isinstance(contract, dict) and contract.get('status') == 'none_documented']
+
+
+def confirm_gaps(policy, review_evidence):
+    """A recorded absence needs an independent confirmation, never self-attestation."""
+    units = none_documented_units(policy)
+    if not units:
+        return
+    review = (review_evidence or {}).get('review') or {}
+    if review.get('status') != 'pass':
+        raise RuntimeBlocked(
+            'invalid_input_review_missing',
+            'none_documented needs an independent review that confirms the examined materials: '
+            + ', '.join(units) + '; without it the classification is only a declaration',
+            'contract')
+
+
 def handoff(package, sources, destination):
     """One verified source handoff shared by planner and context renderer."""
     destination.mkdir(parents=True)
@@ -91,10 +174,12 @@ def handoff(package, sources, destination):
                          safe_relative(destination, "sources/" + source["id"] + "/" + f["path"]), f["sha256"])
 
 
-def validate(p, index, source, binding, opts, locked=None):
+def validate(p, index, source, binding, opts, locked=None, anchors=None):
     if redact(json.dumps(p, ensure_ascii=False)) != json.dumps(p, ensure_ascii=False):
         raise RuntimeBlocked("unsafe_plan", "Plan contains credential-like literals", "environment")
-    cases, _, total = planner.validate_plan(p, index, source, [c for c in locked if c.get('origin') != 'authored_check'] if locked else None)
+    cases, _, total = planner.validate_plan(p, index, source,
+                                            [c for c in locked if c.get('origin') != 'authored_check'] if locked else None,
+                                            anchors)
     from .entry import runtime_path
     entry = runtime_path(binding)
     if p["script"] != entry or "/opt/skill/" + entry not in p["entrypoint"]:
@@ -106,7 +191,8 @@ def validate(p, index, source, binding, opts, locked=None):
     return cases
 
 
-def propose(source, binding, audit, opts, constraints=None, locked=None, feedback=None, call_guard=None, previous=None):
+def propose(source, binding, audit, opts, constraints=None, locked=None, feedback=None, call_guard=None,
+            previous=None, anchors=None):
     """Reuse planner reads/patches; stop repeated diagnoses instead of hidden quotas."""
     import itertools
     deadline = None if opts["total_seconds"] is None else time.monotonic() + opts["total_seconds"]
@@ -122,7 +208,7 @@ def propose(source, binding, audit, opts, constraints=None, locked=None, feedbac
             Path(audit) / str(number), opts, deadline, feedback=feedback, previous=previous, call_guard=call_guard,
             required=required)
         try:
-            cases = validate(p, index, source, binding, opts, locked)
+            cases = validate(p, index, source, binding, opts, locked, anchors)
             return p, index, cases
         except (planner.PlanningError, ValueError) as exc:
             diagnostic = str(exc)
@@ -246,6 +332,9 @@ def prepare(record, package, sources, workspace, spec, executor, call_guard=None
         write_json(source / 'source-identities.json', source_view(sources))
         index = planner.inventory(source, opts)
         host = host if host is not None else executor.host()
+        # Stated invalid-input obligations are anchored before any classification is
+        # judged, and they only accumulate across revisions.
+        anchors = merged_anchors(record, spec.get('requirements') or [])
         p = copy.deepcopy(spec.get("plan"))
         if p is None:
             if host["gaps"]:
@@ -264,12 +353,15 @@ def prepare(record, package, sources, workspace, spec, executor, call_guard=None
                     'Existing author checks are additionally locked and executed against the actual Markdown. ' +
                     json.dumps(d['inputs']['acceptance']['payload'], ensure_ascii=False)]
             p, index, _ = propose(source, binding, target / "planning", planning_opts, entry_constraints, spec.get("locked_cases"),
-                                  feedback=spec.get('feedback'), call_guard=counted_call_guard, previous=spec.get('previous_plan'))
+                                  feedback=spec.get('feedback'), call_guard=counted_call_guard,
+                                  previous=spec.get('previous_plan'), anchors=anchors)
         else:
             index["read_files"] = list(index["files"])
         if redact(json.dumps(p, ensure_ascii=False)) != json.dumps(p, ensure_ascii=False):
             raise RuntimeBlocked("unsafe_plan", "Plan contains credential-like literals")
-        cases = validate(p, index, source, binding, opts, spec.get("locked_cases"))
+        cases = validate(p, index, source, binding, opts, spec.get("locked_cases"), anchors)
+        confirm_gaps(json.loads(p['acceptance_json']), review_evidence)
+        write_json(target / "input-anchors.json", anchors)
         from .checks import mapped_checks
         original_acceptance = d['inputs']['acceptance']['payload'] or {}
         cases += mapped_checks(original_acceptance, p, [s['id'] for s in sources])
@@ -293,7 +385,8 @@ def prepare(record, package, sources, workspace, spec, executor, call_guard=None
         resource_inputs = {key: {k: v for k, v in value.items() if k in {"sha256", "env"}}
                            for key, value in spec.get("resource_refs", {}).items() if key in required_names}
         rebind(record, binding, {"plan": p, "materials": manifest(target), "limits": opts, "resource_inputs": resource_inputs},
-               {"cases": cases, "policy": json.loads(p["acceptance_json"]), "author_tests": author_tests})
+               {"cases": cases, "policy": json.loads(p["acceptance_json"]), "author_tests": author_tests,
+                "input_anchors": anchors})
     except (RuntimeBlocked, planner.PlanningError, planner.ModelUnavailable, OSError, ValueError, ImportError) as exc:
         result["gaps"].append({"code": getattr(exc, "code", "plan_unresolved"), "detail": redact(str(exc)),
                                "repair_lane": getattr(exc, "lane", "environment"),

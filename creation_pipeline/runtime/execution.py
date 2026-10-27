@@ -14,6 +14,7 @@ def tool_for(record, request):
     return {'entrypoint': p['entrypoint'], 'limits': env['limits'], 'runtime_network': p['runtime_network'],
             'behavior': {'file_io': p['file_io']}, 'acceptance_version': 2,
             'acceptance_policy': json.loads(p['acceptance_json']),
+            'input_anchors': (record['delivery']['inputs']['acceptance']['payload'] or {}).get('input_anchors') or {},
             'source_mount': str(Path(request.frozen_directory) / 'sources'), 'execution_scope': Path(request.attempt_directory).name}
 
 
@@ -55,7 +56,8 @@ def locked_inputs(record, request):
             p = root / 'runtime/context' / name
             index['files'][name] = {'size': p.stat().st_size, 'sha256': file_digest(p)}
             index['read_files'].append(name)
-    cases = validate(env['plan'], index, root, d['inputs']['bindings']['payload'], env['limits'])
+    cases = validate(env['plan'], index, root, d['inputs']['bindings']['payload'], env['limits'],
+                     anchors=(d['inputs']['acceptance']['payload'] or {}).get('input_anchors'))
     cases += mapped_checks(d['inputs']['acceptance']['payload'].get('author_tests', {}), env['plan'], [s['id'] for s in d['inputs']['sources']])
     locked = read_json(root / 'runtime/locked-tests.json')
     if (fingerprint(cases) != fingerprint(locked['cases'])

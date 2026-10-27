@@ -20,7 +20,7 @@ JSON or YAML object. Only sources is required; YAML needs PyYAML. Unknown top-le
 | intent | auto | Legacy guidance direct/extension/auto; explain behavior in construction |
 | draft_only | false | Persist drafts without formal qualification; never an execution bypass to accepted |
 | runtime_requirements | {} | Candidate declarations with status, reason and verifiable source citations; conflicts stay unknown |
-| runtime | {} | Candidate binding/plan/options/resource_refs/constraints; absent plan invokes source-grounded planner |
+| runtime | {} | Candidate binding/plan/options/resource_refs/constraints/requirements; absent plan invokes source-grounded planner. `requirements` defaults to the creation prompt plus `constraints` and anchors the invalid-input classification |
 | runtime_defaults | {} | Runtime preparation settings shared by every candidate; merged under `runtime.<candidate>` (per-candidate keys win). Lets a normal creation fix provider options before discovery names the candidate |
 | revision_parents | {} | Explicit expected current revision for reviewed replacements; prevents accidental overwrite |
 

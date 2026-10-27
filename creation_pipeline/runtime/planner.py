@@ -288,6 +288,11 @@ def patch_plan(base, answer, locked, required=None):
     # External obligations are anchored before any promise is compared, so a repair
     # can never trade scope it does not own for an easier plan.
     _require_scope(result, base, required)
+    if not locked:
+        # A rejected draft's classification may be corrected, but only with the
+        # recorded evidence of what was examined; an accepted plan cannot be touched
+        # here at all, so an approved contract can only change by a new revision.
+        reject_downgrade(_json_field(base, 'acceptance_json'), _json_field(result, 'acceptance_json'))
     if locked:
         # An accepted plan is evidence: it may only grow. Withdrawing an accepted
         # promise would silently shrink the standard the environment was locked to.
@@ -333,11 +338,14 @@ def scope_delta(base, result):
         return {item.get('id') for item in document.get(key, [])
                 if isinstance(item, dict) and item.get('id')}
     old_checks = ids(old, 'checks')
+    before, after = input_states(old), input_states(new)
     delta = {
         'tests': sorted(names(base.get('tests', [])) - names(result.get('tests', []))),
         'purposes': sorted(set(old.get('purposes', [])) - set(new.get('purposes', []))),
         'operations': sorted(ids(old, 'operations') - ids(new, 'operations')),
         'checks': sorted(old_checks - ids(new, 'checks')),
+        'input_states': {unit: [state, after.get(unit)] for unit, state in sorted(before.items())
+                         if after.get(unit) != state},
         'selected_checks': sorted(
             f"{operation.get('id')}/{check}"
             for operation in old.get('operations', []) if isinstance(operation, dict)
@@ -346,6 +354,39 @@ def scope_delta(base, result):
                       if isinstance(o, dict) and o.get('id') == operation.get('id')), []))),
     }
     return {key: value for key, value in delta.items() if value}
+
+
+def input_states(policy):
+    """Invalid-input classification per unit, as declared by one policy."""
+    if not isinstance(policy, dict):
+        return {}
+    operations = policy.get('operations') or []
+    if operations and all(isinstance(o, dict) and 'input_contract' in o for o in operations):
+        return {str(o.get('id')): (o['input_contract'] or {}).get('status') for o in operations}
+    if isinstance(policy.get('input_contract'), dict):
+        return {'tool': policy['input_contract'].get('status')}
+    return {'tool': policy.get('invalid_input')}
+
+
+DOWNGRADES = {('required', 'none_documented'), ('required', 'not_applicable'),
+              ('none_documented', 'not_applicable')}
+
+
+def reject_downgrade(base_policy, result_policy):
+    """A repair may correct a draft classification only with recorded evidence."""
+    before, after = input_states(base_policy), input_states(result_policy)
+    for unit, state in before.items():
+        if (state, after.get(unit)) not in DOWNGRADES:
+            continue
+        record = (result_policy.get('input_contract')
+                  or next((o.get('input_contract') for o in result_policy.get('operations') or []
+                           if str(o.get('id')) == unit), None) or {})
+        missing = [field for field in ('reason', 'scope', 'limitation', 'checked', 'review')
+                   if not record.get(field)]
+        if missing:
+            raise PlanningError('Repair cannot downgrade the invalid-input classification of '
+                                + unit + ' from ' + state + ' to ' + str(after.get(unit))
+                                + ' without recorded evidence; missing ' + ', '.join(missing))
 
 
 def _nested_text_target(parts):
@@ -548,6 +589,24 @@ stdout after container exit; use it for a stdout-only tool instead of inventing 
 output flag.
 /output is mounted only for cases declaring output_file. Environment probes must
 not assume this optional mount exists without requesting/creating a result file.
+Invalid-input requirement and its verification are separate. acceptance_json
+classifies each operation (and the whole tool when it declares no operations) with
+input_contract {status, ...} in one of three states:
+- required: the caller, the delivered interface (a wrapper's own error branch counts)
+  or the source states a constraint; give constraint and named checks, and one real
+  rejection case per check. Upstream silence never waives a delivered promise; cite
+  the delivered file when that is the basis.
+- none_documented: no examined material and no promise declares a contract. Give
+  reason, scope, limitation, checked:[{source_path, sha256}] naming the examined
+  materials with their fingerprints, and review:{status:"confirmed", reviewer,
+  materials_sha256}. A quotation is optional context, never proof of absence. It
+  waives only an invented rejection expectation and is reported as a validation gap.
+- not_applicable: no caller-supplied business input; give reason. A fixed-example
+  tool need not invent an input interface; an input-taking tool is never exempt.
+invalid_input is the strongest declared state. Coverage reports coverage_complete,
+validation_gaps and blockers separately; a stated obligation without a verifiable
+contract blocks, and no recorded gap can replace it. A repair may correct a draft
+classification only when it carries this recorded evidence.
 Fixture contract rules. The validators are exact; a near miss is rejected as a plan
 error, not repaired silently. Executable examples of each rule follow this policy.
 - case_json is JSON TEXT: one string holding the case object, never a nested object.
@@ -924,7 +983,7 @@ def check_probe_syntax(case, default_entrypoint):
             except SyntaxError as exc:raise PlanningError('Invalid positive Python probe syntax: '+str(exc)) from exc
 
 
-def validate_plan(p, index, source, previous_cases=None):
+def validate_plan(p, index, source, previous_cases=None, anchors=None):
     # jsonschema also validates fake/replayed responses, not only CLI structured outputs.
     import jsonschema
     try:
@@ -1059,7 +1118,8 @@ def validate_plan(p, index, source, previous_cases=None):
         from .coverage import acceptance_coverage
         from .coverage import select_usage_case, NoUsageCase
         tool = {'entrypoint': p['entrypoint'], 'behavior': {'file_io': p['file_io']},
-                'acceptance_version': 2, 'acceptance_policy': policy}
+                'acceptance_version': 2, 'acceptance_policy': policy,
+                'input_anchors': anchors or {}}
         diagnostic = acceptance_coverage(tool, cases)
         try:
             select_usage_case(tool, cases)
