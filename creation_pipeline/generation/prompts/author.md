@@ -2,7 +2,8 @@ Build a usable English skill from the candidate and actual research sources. Fol
 supplied minimum/packaging rules as semantic constraints, not a chapter template.
 Record metadata.entry naming the single executable entry of the delivery when it has
 one: {"kind":"script","path":"<delivered .py or .sh>"} or
-{"kind":"markdown_python","path":"SKILL.md","block_index":<n>} (optionally with the
+{"kind":"markdown_python","path":"SKILL.md","block_index":<n>} (block_index is 0-based:
+the first python block is 0) (optionally with the
 code_sha256 of that block). Declare it whenever the package ships scripts together with
 documentation examples, or more than one script; without a declaration such a package
 is refused as ambiguous instead of being guessed. The host validates the declaration

@@ -71,6 +71,35 @@ class MarkdownEntryTests(unittest.TestCase):
         (self.package / 'SKILL.md').write_text('```python\nimport math\ndef f(x):\n return math.sqrt(x)\n```\n', encoding='utf-8')
         self.assertEqual(markdown_entry(self.package)[0]['kind'], 'markdown_python')
 
+    def test_a_one_based_index_over_a_single_block_is_normalised_visibly(self):
+        # Run 18: the author declared block_index 1 for a SKILL.md that has exactly one
+        # block. One candidate means no interpretation is guessed, so it is accepted
+        # and the normalisation is recorded rather than hidden.
+        (self.package / 'SKILL.md').write_text('```python\nprint(1)\n```\n', encoding='utf-8')
+        binding, _ = markdown_entry(self.package, 1)
+        self.assertEqual(binding['extraction']['block_index'], 0)
+        self.assertEqual(binding['extraction']['declared_block_index'], 1)
+        self.assertIn('one-based', binding['extraction']['block_index_basis'])
+        plain, _ = markdown_entry(self.package, 0)
+        self.assertNotIn('declared_block_index', plain['extraction'])
+
+    def test_an_out_of_range_index_still_fails_and_says_zero_based(self):
+        (self.package / 'SKILL.md').write_text('```python\nprint(1)\n```\n', encoding='utf-8')
+        with self.assertRaises(EntryError) as caught:
+            markdown_entry(self.package, 2)
+        self.assertEqual(caught.exception.code, 'entry_declaration_missing')
+        self.assertIn('0-based', str(caught.exception))
+
+    def test_a_one_based_index_over_multiple_blocks_is_still_refused(self):
+        # With more than one block, one-based and zero-based differ: refuse instead of
+        # guessing which block the author meant.
+        (self.package / 'SKILL.md').write_text('```python\nprint(1)\n```\n```python\nprint(2)\n```\n',
+                                               encoding='utf-8')
+        binding, _ = markdown_entry(self.package, 1)
+        self.assertEqual(binding['extraction']['block_index'], 1)
+        with self.assertRaises(EntryError):
+            markdown_entry(self.package, 2)
+
     def test_python_fence_inside_literal_markdown_is_not_an_entry(self):
         for outer in ('````markdown', '~~~markdown'):
             closing = '````' if outer.startswith('`') else '~~~'

@@ -47,13 +47,22 @@ def markdown_entry(package, block_index=None):
         if len(blocks) != 1 or len(openings) != 1:
             raise EntryError('entry_unsupported', 'Require exactly one complete, unindented ```python block in SKILL.md; multiple/interactive/ambiguous blocks are unsupported')
         index = 0
+        declared_one_based = None
     else:
         if type(block_index) is not int or block_index < 0:
             raise EntryError('entry_declaration_invalid', 'A declared Markdown block index must be a nonnegative integer')
         if not blocks:
             raise EntryError('entry_unsupported', 'SKILL.md contains no complete, unindented ```python block')
+        if block_index >= len(blocks) and len(blocks) == 1 and block_index == 1:
+            # A one-based index over a single block is unambiguous: there is exactly
+            # one candidate, so no interpretation is being guessed. Record the
+            # normalisation instead of refusing a correct delivery on a convention.
+            declared_one_based = block_index
+            block_index = 0
+        else:
+            declared_one_based = None
         if block_index >= len(blocks):
-            raise EntryError('entry_declaration_missing', 'Declared Markdown block %d does not exist; SKILL.md has %d complete block(s)'
+            raise EntryError('entry_declaration_missing', 'Declared Markdown block %d does not exist; SKILL.md has %d complete block(s); block_index is 0-based'
                              % (block_index, len(blocks)))
         index = block_index
     # A Python-looking fence inside a larger literal fence is documentation,
@@ -94,12 +103,18 @@ def markdown_entry(package, block_index=None):
     missing = unresolved(table)
     if missing:
         raise EntryError('entry_context_missing', 'Python entry needs undeclared context: ' + ', '.join(sorted(missing)), 'content', 'content_defect')
+    extraction = {'rule': 'single-unindented-python-fence-v1', 'block_index': index,
+                  'start_byte': block.start(1), 'end_byte': block.end(1),
+                  'start_line': raw[:block.start(1)].count(b'\n') + 1,
+                  'markdown_sha256': hashlib.sha256(raw).hexdigest(),
+                  'code_sha256': hashlib.sha256(code).hexdigest()}
+    if declared_one_based is not None:
+        # Visible normalisation: the delivery had one block and the declaration was
+        # one-based. The resolved index is what later stages verify.
+        extraction.update(declared_block_index=declared_one_based,
+                          block_index_basis='one-based normalized over a single block')
     return {'kind': 'markdown_python', 'entry': 'SKILL.md', 'runtime_entry': 'entry/skill.py',
-            'extraction': {'rule': 'single-unindented-python-fence-v1', 'block_index': index,
-                'start_byte': block.start(1), 'end_byte': block.end(1),
-                'start_line': raw[:block.start(1)].count(b'\n') + 1,
-                'markdown_sha256': hashlib.sha256(raw).hexdigest(),
-                'code_sha256': hashlib.sha256(code).hexdigest()}}, code
+            'extraction': extraction}, code
 
 
 DECLARATION_FIELDS = frozenset({'kind', 'path', 'block_index', 'code_sha256'})
