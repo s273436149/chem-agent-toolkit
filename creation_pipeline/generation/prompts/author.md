@@ -39,6 +39,10 @@ metadata_path JSON containing tests, issues and notes (arrays; empty is allowed)
 exercise actual delivered examples/scripts, use source-grounded expected results and relevant
 boundaries; do not invent a check simply to satisfy a template. Each test has name, argv, cwd,
 expected_exit, stdout_contains and/or json_equals/artifacts, evidence, purpose, kind.
+A check needs a result assertion, not an exit code alone: every check, including a
+rejection check, must assert observable output (stdout_contains, json_equals or a
+nonempty artifact). "expected_exit only" is rejected by the delivery validator and
+counts as a failed author turn.
 evidence is one registered source locator ID string (for example e1), not an array;
 explain the inspected source passage and expected behavior in purpose.
 {python},{package},{run},{source:ID} are check-only macros. Explicitly group/select continuous
