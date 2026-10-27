@@ -682,7 +682,10 @@ of the others; numeric_scale checks second scalar = first * factor.
 For independent tests use a CLI test runner or a small reference implementation
 in entrypoint python -c, explicitly documenting independence. Relation alone never
 establishes all scientific correctness. At least one environment and one interface
-case are required. Try behavior validation even without numerical truth; document
+case are required, and they must be oracle_status=supported: an environment probe
+validates the built image (interpreter and installed tool/version) rather than a
+source-backed behavior, so it is supported even without a behavior oracle.
+candidate/regression mark behavior expectations that are not source-proven. Try behavior validation even without numerical truth; document
 what could not be justified in unverified_behavior. No assertions means only an
 exit-code check. Capture package versions in an environment probe if available.
 Use /input (read-only), /output (persistent), /tmp (writable) for file IO. Include
