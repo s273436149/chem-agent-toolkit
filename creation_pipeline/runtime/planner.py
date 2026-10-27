@@ -493,8 +493,9 @@ def _as_json_text(value, field):
         try:
             json.loads(value)
         except ValueError as exc:
-            raise PlanningError('%s must hold JSON text; the supplied text is not JSON: %s'
-                                % (field, exc)) from exc
+            raise PlanningError('%s must hold JSON text; the supplied text is not JSON: %s. '
+                                'Return this field as a JSON object instead of text to avoid '
+                                'escaping errors.' % (field, exc)) from exc
         return value
     if isinstance(value, (dict, list)):
         return json_text(value)
@@ -658,11 +659,9 @@ The authoritative rules and required fields for each state are these, and the sa
 text is carried in the acceptance_json schema description:
 """+INPUT_CONTRACT_SPEC+"""Fixture contract rules. The validators are exact; a near miss is rejected as a plan
 error, not repaired silently. Executable examples of each rule follow this policy.
-- case_json is the case object. Return it as a JSON OBJECT in a full plan and the
-  validator encodes it for you; JSON text holding the same object is also accepted.
-  Prefer the object form: hand-escaped text is where malformed plans come from, and
-  invalid text is a plan error, not repaired silently. acceptance_json follows the
-  same rule, and a patch accepts both encodings for both fields.
+- In a FULL PLAN return case_json and acceptance_json as JSON OBJECTS: the validator
+  encodes them for you. Hand-written JSON text is where malformed plans come from and
+  is not repaired silently. JSON text is accepted only in patch operations.
 - The only assertion keys are stdout_equals, stdout_contains, expected_json_lines
   and relation. A layer=behavior test with oracle_status=supported must carry at
   least one of them inside case_json, or set case_json.entrypoint to an explicit
