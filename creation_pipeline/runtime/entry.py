@@ -241,6 +241,37 @@ def verify_material(package, binding, material):
         raise ValueError('Extracted entry differs from exact delivered code bytes')
 
 
+def _upstream_path(view, source):
+    """The upstream file path a single-file snapshot came from, if recorded."""
+    entry = next((item for item in view if item['id'] == source['source_id']), None)
+    if entry is None:
+        return None
+    inventory = entry.get('inventory') or []
+    if len(inventory) != 1 or inventory[0].get('path') != source['path']:
+        return None
+    upstream = entry.get('upstream')
+    return upstream.get('path') if isinstance(upstream, dict) else None
+
+
+def _candidate_source(source_text, view, proposal):
+    """The supplied snapshot the citation names, or None when it is not unique.
+
+    A model may name the logical upstream path instead of the snapshot path it was
+    given. That alias is accepted only when exactly one supplied file maps to it, and
+    the quote is still verified against that file's bytes.
+    """
+    exact = [s for s in source_text
+             if s['source_id'] == proposal['source_id'] and s['path'] == proposal['source_path']]
+    if exact:
+        return exact, None
+    aliases = [s for s in source_text
+               if s['source_id'] == proposal['source_id']
+               and _upstream_path(view, s) == proposal['source_path']]
+    if len(aliases) == 1:
+        return aliases, proposal['source_path']
+    return [], None
+
+
 def associate(record, package, sources, audit, opts, guard=None, deadline=None, entry=None):
     """One bounded proposal and independent semantic review, never self-approval.
 
@@ -275,14 +306,21 @@ def associate(record, package, sources, audit, opts, guard=None, deadline=None, 
               'quote': {'type': 'string'}, 'reason': {'type': 'string'},
               'invocation': {'type': 'string'}, 'supported': {'type': 'boolean'}}
     schema = {'type': 'object', 'properties': fields, 'required': list(fields), 'additionalProperties': False}
+    view = source_view(sources)
+    citation_paths = [{'source_id': s['source_id'], 'path': s['path'],
+                       'upstream_path': _upstream_path(view, s)} for s in source_text]
     prompt = ('Associate the actual delivered entry with an inspected upstream API/tool. Return supported=false if uncertain. '
               'Supply one contiguous verbatim substring from the chosen source file as quote proving the API relationship. '
               'Never concatenate separate excerpts, insert ellipses, or change whitespace in quote; put additional API explanations in reason. '
+              'source_path must be the snapshot path of the supplied file exactly as listed in citation_paths '
+              '(for example document.py); an upstream repository path such as rdkit/Chem/Recap.py belongs in reason, '
+              'not in source_path. '
               'Explain both source and delivery scope, '
               'and describe interpreter, arguments/function inputs, working directory, outputs and necessary supports. '
               'Do not edit code or propose tests/expected outputs. A local carrier commit is NOT an upstream version.\n' +
-              json.dumps({'entry': entry, 'delivery': [{'path': f['path'], 'text': safe_relative(Path(package), f['path']).read_text(encoding='utf-8', errors='replace')} for f in manifest(package)],
-                          'source_identities': source_view(sources), 'sources': source_text}, ensure_ascii=False))
+              json.dumps({'entry': entry, 'citation_paths': citation_paths,
+                          'delivery': [{'path': f['path'], 'text': safe_relative(Path(package), f['path']).read_text(encoding='utf-8', errors='replace')} for f in manifest(package)],
+                          'source_identities': view, 'sources': source_text}, ensure_ascii=False))
     if redact(prompt) != prompt:
         raise EntryError('unsafe_binding_source', 'Credential-like source material cannot enter association prompts', kind='unresolved_input')
     (audit / 'proposal-prompt.txt').write_text(prompt, encoding='utf-8')
@@ -306,12 +344,16 @@ def associate(record, package, sources, audit, opts, guard=None, deadline=None, 
     write_json(audit / 'proposal.json', proposal); write_json(audit / 'receipt.json', receipt)
     if not proposal['supported']:
         raise EntryError('binding_unresolved', proposal['reason'], kind='unresolved_input')
-    candidates = [s for s in source_text if s['source_id'] == proposal['source_id'] and s['path'] == proposal['source_path']]
+    candidates, source_path_alias = _candidate_source(source_text, view, proposal)
     if len(candidates) != 1 or not proposal['quote'].strip() or proposal['quote'] not in candidates[0]['text'] or not proposal['reason'] or not proposal['invocation']:
         raise EntryError('binding_unresolved', 'Association lacks a verified exact source citation and invocation', kind='unresolved_input')
-    binding = dict(entry, association='reviewed', source_id=proposal['source_id'], source_path=proposal['source_path'],
+    binding = dict(entry, association='reviewed', source_id=proposal['source_id'], source_path=candidates[0]['path'],
                    source_sha256=candidates[0]['sha256'], quote=proposal['quote'], reason=proposal['reason'], invocation=proposal['invocation'],
                    entry_sha256=file_digest(safe_relative(Path(package), entry['entry'])), files=manifest(package))
+    if source_path_alias:
+        # Record that the proposal named the logical upstream path; the binding still
+        # points at the supplied snapshot whose bytes were checked.
+        binding['source_path_alias'] = source_path_alias
     timeout, remaining = limits()
     reviewed = review_snapshot(record, package, sources, audit / 'review', proposed_binding=binding,
         model=opts['model'], timeout=timeout, total_seconds=remaining, call_guard=guard,
