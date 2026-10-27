@@ -1,4 +1,88 @@
-# 最终验收报告（真实实验 · 第 10–12 次运行）
+# 最终验收报告（真实实验 · 第 13 次运行）
+
+日期：2026-10-27
+副本：`E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi`
+本次授权：最多 3 轮全新实验、每轮 12 次应用层调用；本轮为第 1 轮。
+运行目录：`E:\Users\27343\Docker\acceptance-deepseek-run13-20261027`（构建 `20261027T200753-a864f013`）
+
+## 最终结论
+
+**本轮被外部资源上限阻断，不是代码缺陷，也不是验收失败。** 10–12 轮暴露的三处缺陷都已修复并回归，
+本轮在修复后的代码上重新开始；来源准备、发现、编写三步真实完成，第 3 步**独立审阅**调用被
+Codex CLI 账户拒绝：
+
+```
+Incomplete Agent turn: exit=1
+You've hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more
+credits or try again at Nov 2nd, 2026 1:59 PM.
+```
+
+因此：**入口关联、环境规划、Docker 构建、业务验收、晋升、安装全部 `not_run`**；
+本轮用掉 **3/12** 次调用（发现 completed、编写 completed、审阅 failed）。
+
+授权中的第 2、3 轮**现在无法执行**：每一轮都需要 Codex CLI 完成发现/编写/独立审阅，
+在当前账户额度恢复前同样会在审阅步失败。按“不重启、不续批、不浪费授权”的规则，我没有继续发起
+注定失败的两轮，也没有把原生阶段改道到 API 提供方——那属于“全部模型阶段迁移”，本次架构明确不做，
+需要你单独授权。
+
+> 审查由**当前执行代理**完成，并非独立模型复核。
+
+## 1. 本轮账本
+
+| 阶段 | Provider / 模型 | 状态 |
+| --- | --- | --- |
+| 来源准备 | — | **通过**（20,662 / 1,580 字节，哈希匹配） |
+| 发现 | Codex CLI / `gpt-6-astra` | **completed** |
+| 编写 | Codex CLI / `gpt-6-astra` | **completed** |
+| 独立审阅 | Codex CLI / `gpt-6-astra` | **failed — 账户用量上限** |
+| 入口关联 / 环境规划 / Docker / 业务验收 / 晋升 / 安装 | — | `not_run` |
+
+应用层调用 **3 / 12**；单次 600 s、整轮 3600 s 均未触及；无重试、无回退、无探针；未重启、未续批。
+
+## 2. 进入本轮前的修复（第 10–12 轮遗留）
+
+| # | 缺陷 | 修复提交 |
+| --- | --- | --- |
+| F1 | 关联引文用上游路径而非快照路径 | `2bebb12`（提示给出 `citation_paths`；唯一别名可解析，引文仍按快照字节校验） |
+| F2 | `none_documented` 操作被强制要求 checks；规划器看不到作者声明的拒绝检查 | `22548c0` |
+| F3 | 完整计划不接受对象编码 | `d1e704b` |
+
+离线回归：**515 OK (3 skipped)**；`verify_prompt_contract`、`verify_acceptance_prompt check`、
+`verify_planner check` 均通过；冻结提示 15,204 B。
+
+## 3. 阻断的处置选项（需要你决定）
+
+1. **等待/充值 Codex 额度**（提示的恢复时间：2026-11-02 13:59），之后按同样约束重跑；
+   这是唯一不改变架构、可继续验证 `pin_base_image` 与 Docker 阶段的路径。
+2. **授权更换原生 CLI/账户**（例如另一台已登录的 CLI 或另一模型），保持“发现/编写/审阅走 CLI、
+   结构化调用走 DeepSeek”的边界。
+3. **授权把发现/编写/审阅也迁到 DeepSeek**：这是完整模型阶段迁移，需重新评估工具调用循环、
+   审阅独立性等，属于架构变更，不能由我自行决定。
+
+## 4. 证据与可复现
+
+```text
+validation/deepseek-api/evidence/real-batch-run13-20261027/
+  batch-summary.json  summary.json  sources.lock.json  record.json  run13.log
+  agent-turns/00{1-discovery,2-author,3-review}/{command.json,prompt.txt,result.json,stderr.log}
+  delivered/{SKILL.md,scripts/...}
+```
+
+凭据形状命中 **0**；轮次未被重启或续批。
+
+```powershell
+$env:PATH = 'C:\Users\27343\AppData\Local\OpenAI\Codex\bin\2993767bd1dfb009;' + $env:PATH
+cd E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi
+python -m creation_pipeline build validation/deepseek-api/acceptance-normal-input.json `
+  --state-dir <new>\state --library-dir <new>\library
+python -m unittest discover -s tests -q      # 515 OK (3 skipped)
+```
+
+**最终 SKILL.md**：未形成合格交付（本轮候选停在 candidates 区）。
+
+## 第 10–12 轮记录（历史，结论保留）
+
+### 10–12 轮结论
 
 日期：2026-10-27
 副本：`E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi`
@@ -6,7 +90,7 @@
 `api_retries=0`，无回退、无探针、失败不重启/不续批；轮次之间自行修复阻断缺陷。
 运行目录：`acceptance-deepseek-run10|11|12-20261027`
 
-## 最终结论
+### 10–12 轮结论正文
 
 **三轮真实实验全部执行完毕，均未通过；Docker 构建仍未发生。** 每一轮都在更深处阻塞，
 且每一处阻塞都被定位为管线/协议缺陷并已离线修复：
@@ -23,7 +107,7 @@ Docker 构建、业务验收、catalog 晋升、安装与安装后使用全部 `
 
 > 审查由**当前执行代理**完成，依据源码、调用路径与反例；**并非独立模型复核**。
 
-## 1. 三轮的账本与阶段
+### 10–12 轮账本与阶段
 
 | 项 | run 10 | run 11 | run 12 |
 | --- | --- | --- | --- |
@@ -35,7 +119,7 @@ Docker 构建、业务验收、catalog 晋升、安装与安装后使用全部 `
 
 `pin_base_image` 在三轮中均**未被执行**（没有任何一轮进入 preparation 的镜像解析）。
 
-## 2. 本轮修复（每处都有回归）
+### 10–12 轮修复
 
 | # | 缺陷 | 修复 | 回归 |
 | --- | --- | --- | --- |
@@ -46,7 +130,7 @@ Docker 构建、业务验收、catalog 晋升、安装与安装后使用全部 `
 修复后离线回归：**515 OK (3 skipped)**；`verify_prompt_contract`、`verify_acceptance_prompt check`、
 `verify_planner check` 全部通过；冻结提示重建为 **15,204 B**。
 
-## 3. 未验证范围与最小剩余工作
+### 10–12 轮未验证范围
 
 未验证：Docker 构建、全部业务验收、catalog 晋升、默认查询/安装、容器内使用、
 `pin_base_image` 的解析与冻结、三态 `none_documented` 的真实选用。
@@ -56,7 +140,7 @@ Docker 构建、业务验收、catalog 晋升、安装与安装后使用全部 `
 建议 **12 次调用**（3 Codex + 关联/审阅 2 + 规划 2–3 + 契约诊断/余量），其余约束不变。
 第 12 轮的对象编码缺陷修复后，同一计划会进入语义门禁并得到可修复的诊断，而不是直接终止。
 
-## 4. 证据与可复现
+### 10–12 轮证据
 
 ```text
 validation/deepseek-api/evidence/
