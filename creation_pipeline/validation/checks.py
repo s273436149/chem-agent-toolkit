@@ -92,6 +92,9 @@ def static_checks(package, name=None, *, bundle=None, tool=False):
         text = path.read_text(encoding="utf-8")
         # Inline Markdown links; code examples are not interpreted as Markdown links.
         prose = re.sub(r"```.*?```", "", text, flags=re.S)
+        # Inline code spans are literal too: a SMARTS such as `[C:1](=!@[O:2])` closes
+        # with "](...)" but is chemistry, not a link (run 21).
+        prose = re.sub(r"`[^`\n]*`", "", prose)
         for href in re.findall(r"\]\((<[^>]+>|[^\s)]+)(?:\s+\"[^\"]*\")?\)", prose):
             href = unquote(href.strip("<>"))
             if re.match(r"^[a-zA-Z][\w+.-]*:", href) or href.startswith("#"):
