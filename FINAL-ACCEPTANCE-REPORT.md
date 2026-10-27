@@ -118,8 +118,19 @@ patch-rejection-0.json: Patched plan schema error: {'args': [...], ...} is not o
    * **资源评估可诚实表达**：`status=unknown` 不再要求引用，但须在 `unresolved` 写明
      未定项；执行策略不变，`resources_unknown` 仍阻止 Docker。
    * **policy 去重**：capture_stdout、case_json 键表、修复期范围保持各只保留一处权威
-     表述（fixture 示例仍是可执行反/正例），prompt 由 12,291 B 变为 12,470 B 并已重新冻结。
-   * 这些改动没有放宽任何验收门禁，但**也没有被真实批次验证**。
+     表述（fixture 示例仍是可执行反/正例）。
+   * **非法输入三态化（按 operation）**：`required` / `none_documented` /
+     `not_applicable` 分开判定，"要求"与"是否已验证"分开输出
+     （`coverage_complete` / `validation_gaps` / `blockers`）。判定依据包含**交付接口
+     自己的承诺**（作者/配置声明的拒绝检查、独立审阅过的要求引文、调用方 requirements
+     文本），上游沉默不能豁免；`none_documented` 要求记录检查材料及其指纹、范围、理由、
+     limitation 与独立确认，且**不能**替代用户明确要求的非法输入验收——缺独立审阅产物时
+     `invalid_input_review_missing` 阻塞。修复轮降级必须带证据，锁定契约不可改。
+     prompt 由 12,470 B 变为 13,859 B 并已重新冻结。
+   * 这些改动没有放宽任何验收门禁，但**也没有被真实批次验证**。RECAP 历史已接受计划仍是
+     `required`（引用交付 `entry/skill.py` 的空白校验），`verify_original_case check`
+     显示它在未放宽的门禁下通过（8 个用例）；因此该案例不会、也不应靠新增
+     `none_documented` 过关。
 2. 之后重跑唯一一批（12 次预算、3600 s、新隔离目录）。
 3. 若仍不收敛，则需要重新评估：要么接受"该模型在 8–12 次预算内无法满足这套验收契约"，要么改变策略（更强模型/更多预算/把这套契约拆成可迭代的更小步骤）。
 
@@ -137,7 +148,7 @@ cd E:\Users\27343\Docker\chem-agent-toolkit-integration_deepseekapi
 $env:PATH = 'C:\Users\27343\AppData\Local\OpenAI\Codex\bin\2993767bd1dfb009;' + $env:PATH
 python -m creation_pipeline build validation/deepseek-api/acceptance-normal-input.json `
   --state-dir <new>\state --library-dir <new>\library
-python -m unittest discover -s tests -q      # 450 OK (3 skipped)
+python -m unittest discover -s tests -q      # 478 OK (3 skipped)
 ```
 
 **最终 SKILL.md**：未形成合格交付（候选在 `library/candidates/`）。
