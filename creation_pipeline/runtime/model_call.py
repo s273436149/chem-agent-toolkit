@@ -1,4 +1,16 @@
-"""Isolated, tool-free structured model calls shared by creation and evaluation."""
+"""Isolated, tool-free structured model calls shared by creation and evaluation.
+
+Two backends serve the same ``call`` contract and return the same ``(answer,
+receipt)`` pair:
+
+* ``codex_cli`` (default, unchanged) - the isolated ``codex exec`` child process;
+* ``deepseek_api`` (opt-in, see ``deepseek_api``) - the DeepSeek chat completions
+  API. It is selected explicitly by the caller and is never used as a fallback.
+
+The backend is explicit in every call. An unknown name, a missing credential or a
+failing request raises a classified error; nothing silently retries through the
+other backend or another model.
+"""
 import hashlib
 import json
 import os
@@ -43,6 +55,9 @@ class ModelConfigError(ValueError):
 
     code = 'model_config_invalid'
     kind = 'model_transport'
+
+
+BACKENDS = ('codex_cli', 'deepseek_api')
 
 
 def isolated_options(transport="default", reasoning=None, tier=None):
@@ -324,7 +339,21 @@ def run(command, prompt, root, timeout, audit_dir, metadata, *, stderr_filter=No
 
 
 def call(prompt, schema, model, timeout=900, audit_dir=None, progress_timeout=PROGRESS_TIMEOUT_SECONDS,
-         transport="default", progress_watch="terminate", reasoning=None, tier=None):
+         transport="default", progress_watch="terminate", reasoning=None, tier=None,
+         backend="codex_cli", api_options=None):
+    """Return ``(answer, receipt)`` from the explicitly selected backend.
+
+    ``backend='codex_cli'`` keeps the historical child-process transport byte for
+    byte. ``backend='deepseek_api'`` sends one bounded HTTPS request instead and
+    validates the answer against ``schema`` locally. There is no fallback: an
+    unknown backend is a configuration error, not a reason to try another one.
+    """
+    if backend not in BACKENDS:
+        raise ModelConfigError('Unknown model backend ' + repr(backend) + '; supported: '
+                               + ', '.join(BACKENDS) + '; no request was sent')
+    if backend == 'deepseek_api':
+        return _deepseek_call(prompt, schema, model, timeout, audit_dir, progress_timeout,
+                              reasoning, tier, api_options)
     started=time.monotonic()
     with tempfile.TemporaryDirectory(prefix='chem-decision-') as directory:
         root=Path(directory)
@@ -390,3 +419,36 @@ def call(prompt, schema, model, timeout=900, audit_dir=None, progress_timeout=PR
              'prompt_sha256':hashlib.sha256(prompt.encode()).hexdigest(),
              'response_sha256':hashlib.sha256(json.dumps(answer,sort_keys=True).encode()).hexdigest()}
     return answer,receipt
+
+
+def _translated(exc, target):
+    """Keep the public error type while preserving the provider's classification."""
+    error = target(redact(str(exc)))
+    error.code = getattr(exc, 'code', getattr(target, 'code', 'model_unavailable'))
+    error.kind = getattr(exc, 'kind', getattr(target, 'kind', 'model_transport'))
+    error.detail = getattr(exc, 'detail', {})
+    error.backend = 'deepseek_api'
+    return error
+
+
+def _deepseek_call(prompt, schema, model, timeout, audit_dir, progress_timeout,
+                   reasoning, tier, api_options):
+    """Delegate to the DeepSeek API backend, keeping the ``(answer, receipt)`` shape.
+
+    The provider raises its own classified exceptions; they are re-raised as the
+    module's existing error types so every caller keeps its current handling. The
+    provider writes its own audit ledger before raising.
+    """
+    from . import deepseek_api
+    options = dict(api_options or {})
+    options.setdefault('stream', True)
+    try:
+        return deepseek_api.call(prompt, schema, model, timeout=timeout, audit_dir=audit_dir,
+                                 options=options, reasoning_effort=reasoning,
+                                 service_tier=tier, progress_timeout=progress_timeout)
+    except deepseek_api.ApiConfigError as exc:
+        raise _translated(exc, ModelConfigError) from exc
+    except deepseek_api.ApiOutputInvalid as exc:
+        raise _translated(exc, ModelOutputInvalid) from exc
+    except deepseek_api.ApiTransportError as exc:
+        raise _translated(exc, ModelExecutionError) from exc

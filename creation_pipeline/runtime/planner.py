@@ -53,7 +53,38 @@ DEFAULTS = dict(model=None, max_attempts=None, total_seconds=None,
                 max_files=None, max_file_bytes=None, max_context_bytes=None,
                 memory="1g", cpus="2", pids=128, build_seconds=600,
                 validation_reserve_seconds=0, repair_reserve_seconds=0, test_seconds=60,
-                document_seconds=180, pin_base_image=False, registry_seconds=120)
+                document_seconds=180, pin_base_image=False, registry_seconds=120,
+                # Structured-call backend selection. codex_cli keeps the historical
+                # child-process transport; deepseek_api is opt-in and never a fallback.
+                # ``model`` stays the native Agent/Codex model identity; ``api_model``
+                # is the API provider's model and is never borrowed across providers.
+                backend="codex_cli", api_model=None,
+                api_retries=0, api_max_output_tokens=65536, api_stream=True)
+
+# Documented DeepSeek request bounds, mirrored here so configuration is rejected
+# before a request instead of after one.
+API_MAX_OUTPUT_TOKENS = 393216
+API_MAX_RETRIES = 3
+
+
+def api_options(opts):
+    """Project planner options onto the API backend parameters the caller controls."""
+    return {'retries': opts.get('api_retries', 0),
+            'max_output_tokens': opts.get('api_max_output_tokens'),
+            'stream': opts.get('api_stream', True)}
+
+
+def backend_model(opts):
+    """The model identity the selected backend must use.
+
+    A Codex model name must never reach the API provider, and the API model name
+    must never be passed to the CLI: the two identities are configured separately.
+    For ``deepseek_api`` an unset value stays ``None`` so the provider module reads
+    the operator's own configuration instead of guessing a model name.
+    """
+    if opts.get('backend') == 'deepseek_api':
+        return opts.get('api_model')
+    return opts.get('model')
 
 
 def options(settings):
@@ -73,6 +104,20 @@ def options(settings):
         raise PlanningError("progress_watch must be terminate or observe")
     if result['transport'] not in ('default', 'https'):
         raise PlanningError("transport must be default or https")
+    if result['backend'] not in ('codex_cli', 'deepseek_api'):
+        raise PlanningError("backend must be codex_cli (Codex CLI) or deepseek_api (explicit DeepSeek API); "
+                            "there is no automatic backend fallback")
+    if type(result['api_retries']) is not int or not 0 <= result['api_retries'] <= API_MAX_RETRIES:
+        raise PlanningError("api_retries must be an integer between 0 and %d" % API_MAX_RETRIES)
+    if type(result['api_max_output_tokens']) is not int or not 1 <= result['api_max_output_tokens'] <= API_MAX_OUTPUT_TOKENS:
+        raise PlanningError("api_max_output_tokens must be an integer between 1 and %d" % API_MAX_OUTPUT_TOKENS)
+    if type(result['api_stream']) is not bool:
+        raise PlanningError("api_stream must be a boolean")
+    if result['api_model'] is not None:
+        if not isinstance(result['api_model'], str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", result['api_model']):
+            raise PlanningError("api_model must be a plain provider model identifier or null")
+    if result['model'] is not None and not isinstance(result['model'], str):
+        raise PlanningError("model must be text or null")
     for key in ('reasoning_effort', 'service_tier'):
         if result[key] is not None and not re.fullmatch(r"[a-z0-9_-]{2,20}", str(result[key])):
             raise PlanningError("Invalid " + key)
@@ -464,13 +509,15 @@ def plan(source, config, audit, opts, deadline, feedback=None, previous=None, ca
             remaining = float("inf") if deadline is None else deadline - time.monotonic()
             if remaining <= 0:
                 raise BudgetExceeded("Total planning/build time budget exhausted before model call")
-            answer, receipt = model_call.call(prompt, PATCH_SCHEMA if base is not None else PLAN_SCHEMA, opts["model"],
+            answer, receipt = model_call.call(prompt, PATCH_SCHEMA if base is not None else PLAN_SCHEMA, backend_model(opts),
                                              timeout=min(opts["model_timeout"], remaining),
                                              progress_timeout=opts["progress_timeout"],
                                              progress_watch=opts["progress_watch"],
                                              transport=opts["transport"],
                                              reasoning=opts["reasoning_effort"],
                                              tier=opts["service_tier"],
+                                             backend=opts["backend"],
+                                             api_options=api_options(opts),
                                              audit_dir=audit / f"model-{number}")
         except (model_call.ModelExecutionError, model_call.ModelOutputInvalid,
                 model_call.ModelConfigError, OSError) as exc:

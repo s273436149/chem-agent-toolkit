@@ -29,7 +29,24 @@ names, never credential values. Remote GPU, external resource mounts, secret del
 service probes remain unsupported execution contracts, even when the resources exist.
 Temporary Docker/resource absence is recorded separately from unsupported contracts.
 
-Direct model API/Ollama execution is not implemented. API settings such as base_url/api_key_env/structured are rejected before resource fetching. Existing model.backend=codex_cli configurations remain accepted; no other backend is supported. The underlying Codex connection to its model is unaffected. User model selection and Windows sandbox configuration are retained; arbitrary CLI profiles/plugins are not inherited.
+`model.backend` selects the native Agent stages and stays `codex_cli`; existing configurations remain accepted and no other value is supported there. The structured, tool-free calls (entry association, runtime planning, contract diagnosis) can be routed to the opt-in DeepSeek API backend with `runtime.<candidate>.options.backend=deepseek_api` plus `runtime.<candidate>.options.api_model` (or `DEEPSEEK_MODEL`). `model.name` remains the Codex model used by discovery, authoring and independent review and is never sent to the API provider. There is no automatic fallback between backends, and API/Ollama settings such as `base_url`/`api_key_env` inside `model` are still rejected before resource fetching. See [DeepSeek API backend](../integration/deepseek-api-backend.md). The underlying Codex connection to its model is unaffected. User model selection and Windows sandbox configuration are retained; arbitrary CLI profiles/plugins are not inherited.
+
+## Structured-call options
+
+Validated by `planner.options`; they apply to the three `model_call` stages only.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| backend | codex_cli | codex_cli (unchanged child process) or deepseek_api (explicit, no fallback) |
+| api_model | null | provider model for the API backend; null reads DEEPSEEK_MODEL and never borrows model.name |
+| api_retries | 0 | explicit retries, 0-3, counted in the ledger and inside the same total deadline |
+| api_max_output_tokens | 65536 | max_tokens actually sent; 1-393216 |
+| api_stream | true | SSE streaming; completion requires data: [DONE] and finish_reason=stop |
+
+The API backend reads `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL`, `DEEPSEEK_BASE_URL` and
+`DEEPSEEK_ALLOW_CUSTOM_ENDPOINT` from the environment or the git-ignored repository
+`.env`. A non-official host is refused unless it is explicitly declared as a custom
+endpoint. Missing configuration fails closed: the stage stops, no request is sent.
 
 ## Sources
 

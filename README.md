@@ -27,6 +27,8 @@ Read the [fresh-source example](examples/base-count/README.md), [stage-five resu
 
 Engineering tests: `python -m unittest discover -s tests -q`. Deterministic model fixtures test mechanisms, not real model quality, Docker execution or scientific validity. Historical skills and approval records are not automatically admitted to the integrated library.
 
+This copy adds an opt-in [DeepSeek API backend](docs/integration/deepseek-api-backend.md) for the structured, tool-free model calls only (entry association, runtime planning, contract diagnosis). Discovery, authoring and independent review keep the Codex CLI transport. The backend is selected per candidate with `runtime.<candidate>.options.backend=deepseek_api`; it is never a fallback, the model name is read from configuration and never guessed, and credentials stay in the git-ignored `.env`. See `validation/deepseek-api/` for the acceptance configuration, the frozen planner prompt/schema and the single-request check.
+
 The [contract consistency and automatic repair follow-up](docs/integration/contract-repair.md)
 separates normal creation, historical oracle repair and deliberate fault injection.
 Unknown business failures require source diagnosis; they do not automatically prove

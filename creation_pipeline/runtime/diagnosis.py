@@ -6,6 +6,7 @@ from pathlib import Path
 from creation_pipeline.contracts import fingerprint
 from creation_pipeline.records import read_json, write_json, safe_relative, sanitized
 from . import model_call
+from .planner import api_options, backend_model
 from .acceptance import consistency
 
 
@@ -117,8 +118,14 @@ Return edits=[] for non-contract conclusions.
         raise ValueError('Explicit diagnosis context limit reached; narrow the source scope')
     if call_guard:
         call_guard()
-    answer, receipt = model_call.call(prompt, SCHEMA, options.get('model'),
-        timeout=options.get('model_timeout', 600), audit_dir=directory / 'model')
+    answer, receipt = model_call.call(prompt, SCHEMA, backend_model(options),
+        timeout=options.get('model_timeout', 600), audit_dir=directory / 'model',
+        transport=options.get('transport', 'default'),
+        progress_watch=options.get('progress_watch', 'terminate'),
+        reasoning=options.get('reasoning_effort'),
+        tier=options.get('service_tier'),
+        backend=options.get('backend', 'codex_cli'),
+        api_options=api_options(options))
     write_json(directory / 'decision.json', sanitized(answer))
     write_json(directory / 'receipt.json', receipt)
     if answer['attribution'] != 'unknown':

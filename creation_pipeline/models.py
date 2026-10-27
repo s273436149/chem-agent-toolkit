@@ -109,9 +109,14 @@ def load_config(path):
     if isinstance(model, str):
         model = {"name": model}
     if not isinstance(model, dict) or set(model) - {"backend", "name", "transport", "reasoning_effort", "service_tier"}:
-        raise ValueError("Only native Agent model.name is supported; direct API settings are unsupported")
+        raise ValueError("model supports only backend, name, transport, reasoning_effort and service_tier")
     if model.get("backend", "codex_cli") != "codex_cli":
-        raise ValueError("Only codex_cli Agent execution is supported")
+        # The native discovery/author/review stages still require the Codex CLI. The
+        # opt-in DeepSeek API backend covers the structured calls only, so it is
+        # selected per candidate instead of rewriting the native Agent transport.
+        raise ValueError("Only codex_cli Agent execution is supported for the native "
+                         "discovery/author/review stages; select the structured DeepSeek "
+                         "backend with runtime.<candidate>.options.backend=deepseek_api")
     if "name" in model and not isinstance(model["name"], str):
         raise ValueError("model.name must be text")
     if model.setdefault("transport", "default") not in ("default", "https"):

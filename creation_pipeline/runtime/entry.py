@@ -153,6 +153,7 @@ def verify_material(package, binding, material):
 def associate(record, package, sources, audit, opts, guard=None, deadline=None):
     """One bounded proposal and independent semantic review, never self-approval."""
     from . import model_call
+    from .planner import api_options as planner_options, backend_model
     from .review import review_snapshot
     def limits():
         if deadline is None or not math.isfinite(deadline):
@@ -192,11 +193,13 @@ def associate(record, package, sources, audit, opts, guard=None, deadline=None):
     timeout, _ = limits()
     if guard:
         guard()
-    proposal, receipt = model_call.call(prompt, schema, opts['model'], timeout=timeout, audit_dir=audit / 'model',
+    proposal, receipt = model_call.call(prompt, schema, backend_model(opts), timeout=timeout, audit_dir=audit / 'model',
                                         transport=opts.get('transport', 'default'),
                                         progress_watch=opts.get('progress_watch', 'terminate'),
                                         reasoning=opts.get('reasoning_effort'),
-                                        tier=opts.get('service_tier'))
+                                        tier=opts.get('service_tier'),
+                                        backend=opts.get('backend', 'codex_cli'),
+                                        api_options=planner_options(opts))
     import jsonschema
     try:
         jsonschema.validate(proposal, schema)
