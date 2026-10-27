@@ -55,6 +55,16 @@
   },
   "docker": {"available": true, "server_version": "29.8.2", "os_type": "linux",
              "architecture": "x86_64"},
+  "prepared_input": {
+    "path": "validation/deepseek-api/acceptance-input.json",
+    "sources_model_execution_limits_binding_identical_to_finalized_case": true,
+    "finalized_case": "validation/final-acceptance-review/input-batch-4.json (source repo, read-only)",
+    "added_business_field": "prompt now requires the delivered entry at exactly scripts/terminal_fragments.py, matching the fixed binding",
+    "provider_fields_added": ["backend", "api_model", "api_retries", "api_stream",
+                              "api_max_output_tokens", "model_timeout", "total_seconds",
+                              "reasoning_effort", "service_tier", "progress_watch"],
+    "changes_beyond_provider_and_binding_alignment": "batch label and notes only"
+  },
   "decision": {
     "batch_started": false,
     "model_calls": 0,

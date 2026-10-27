@@ -12,7 +12,7 @@
       "sha256": "daeb8d194502cbcf34c05c39541a0d02be65bc9bada5b891c1974cd24e9fca30"
     }
   ],
-  "prompt": "Discover and package one reusable Skill for RDKit RECAP terminal molecular fragments using RecapDecompose and GetLeaves. Ground the usage, input/output scope, terminal versus full hierarchy interpretation and valid empty results in the provided source. This is molecular fragmentation, not descriptor calculation. Choose appropriate delivery files and document prerequisites and invalid input boundaries. Do not install software or run source/business code on the host; business execution is permitted only in a Docker container. Do not claim chemical or scientific validation beyond the documented algorithm.",
+  "prompt": "Discover and package one reusable Skill for RDKit RECAP terminal molecular fragments using RecapDecompose and GetLeaves. Ground the usage, input/output scope, terminal versus full hierarchy interpretation and valid empty results in the provided source. This is molecular fragmentation, not descriptor calculation. Choose appropriate delivery files and document prerequisites and invalid input boundaries. Do not install software or run source/business code on the host; business execution is permitted only in a Docker container. Do not claim chemical or scientific validation beyond the documented algorithm. The delivered package must contain the executable entry at exactly scripts/terminal_fragments.py; the acceptance binds that path, and a package without it cannot be bound.",
   "model": {
     "name": "gpt-6-astra",
     "transport": "https",
