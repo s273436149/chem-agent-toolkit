@@ -9,8 +9,11 @@ import tempfile
 import time
 import zipfile
 import tarfile
+import urllib.error
 import urllib.parse
 import urllib.request
+import http.client
+import ssl
 from pathlib import Path
 from creation_pipeline.resources.documents import table_rows
 from creation_pipeline.models import BlockedError, exceeded
@@ -39,6 +42,26 @@ class Acquisition:
         self.requests += 1
 
     def _stream(self, url, target, limit):
+        """Download once, retrying only transport-level failures.
+
+        A TLS/EOF blip or a truncated body before any content was accepted is not a
+        source defect; the hash gate still decides what the bytes mean. Each attempt
+        charges the same request budget, so the retry is bounded by configuration.
+        """
+        last = None
+        for attempt in range(self.config["limits"].get("download_attempts", 2)):
+            try:
+                return self._stream_once(url, target, limit)
+            except (urllib.error.URLError, ssl.SSLError, OSError, http.client.HTTPException) as exc:
+                last = exc
+                if isinstance(exc, urllib.error.HTTPError):
+                    raise
+                if attempt + 1 >= self.config["limits"].get("download_attempts", 2):
+                    break
+                time.sleep(min(1.0 * (attempt + 1), 3.0))
+        raise last
+
+    def _stream_once(self, url, target, limit):
         self.charge()
         request = urllib.request.Request(https_url(url), headers={"User-Agent": "research-skill-pipeline/5"})
         total, h = 0, hashlib.sha256()
