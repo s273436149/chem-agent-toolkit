@@ -63,7 +63,9 @@ Invalid-input requirement and its verification are separate. acceptance_json
 classifies each operation, or the whole tool when it declares no operations, with
 input_contract {status, ...} in exactly one of three states. Every operation declares
 its own input_contract; a required operation needs one rejection case per named check,
-while none_documented and not_applicable operations need none.
+while none_documented and not_applicable operations need none. A required state without
+any named check is rejected: add a check plus its rejection case, or declare
+none_documented with its recorded evidence.
 - required: the caller, the delivered interface (a wrapper's own error branch counts)
   or the source states a constraint. Give constraint and at least one named check,
   plus one real rejection case per check. Upstream silence never waives a delivered

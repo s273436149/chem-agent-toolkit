@@ -181,6 +181,13 @@ def contracts(plan, cases, index, source, *, check_consistency=True):
             raise ValueError('Required input classification needs an exact quotation from read source or the delivered entry')
         if mode != 'legacy' and aggregate != 'required' and policy.get('checks'):
             raise ValueError('Input checks describe a constraint, so at least one operation must be required')
+        if mode != 'legacy' and aggregate == 'required' and not policy.get('checks') and not policy.get('operations'):
+            # Say it where the plan is rejected, and name both ways out (run 28 spent
+            # six patch attempts on a diagnostic that did not say how to fix it).
+            raise ValueError('invalid_input=required needs at least one named check with a matching '
+                             'rejection case; if no checkable predicate can be expressed and nothing '
+                             'promised rejection, declare input_contract status=none_documented with '
+                             'its recorded evidence (or not_applicable for an operation without input)')
         for check in policy.get('checks', []):
             if not grounded(check, index, source) or not check.get('id') or check.get('channel') not in {'args', 'input_files'}:
                 raise ValueError('Input checks require grounded id/channel/key/pattern')
