@@ -109,7 +109,9 @@ def acceptance_coverage(tool, cases, observations=None):
                 and all(outcome(case) != outcome(normal) for normal in positive))
     if not positive:
         coverage_reasons.append('No grounded normal input with a result assertion')
-    if not policy.get('purposes') or not set(policy['purposes']) <= {c['acceptance']['purpose'] for c in positive}:
+    purposes = policy.get('purposes')
+    if (not isinstance(purposes, list) or not purposes
+            or not set(purposes) <= {c['acceptance']['purpose'] for c in positive}):
         coverage_reasons.append('Declared purposes are not covered by grounded normal cases')
 
     def unit_positive(operation_id):

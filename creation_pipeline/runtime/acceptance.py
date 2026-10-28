@@ -166,12 +166,19 @@ def contracts(plan, cases, index, source, *, check_consistency=True):
     if not isinstance(policy, dict):
         raise ValueError('acceptance_json must be an object')
     if policy:
-        if not policy.get('purposes') or any(p not in {'computation', 'operation', 'report'} for p in policy['purposes']):
-            raise ValueError('Acceptance scope must declare its required purposes')
+        # Model output is data: a nested object where a string belongs must be a clean
+        # rejection, never a TypeError from a set membership test (run 34).
+        purposes = policy.get('purposes')
+        if (not isinstance(purposes, list) or not purposes
+                or any(not isinstance(item, str) or item not in {'computation', 'operation', 'report'}
+                       for item in purposes)):
+            raise ValueError('Acceptance scope must declare its required purposes as strings')
         mode, aggregate = _classification(policy, index, source)
         if not isinstance(policy.get('scope'), str) or not policy['scope'].strip():
             raise ValueError('Acceptance scope must state which input forms are promised')
-        if mode == 'legacy' and (policy.get('invalid_input') not in {'required', 'not_applicable'}
+        invalid = policy.get('invalid_input')
+        if mode == 'legacy' and (not isinstance(invalid, str)
+                                 or invalid not in {'required', 'none_documented', 'not_applicable'}
                                  or not grounded(policy, index, source)):
             raise ValueError('Input policy requires scope and an exact quotation from read source')
         if aggregate == 'required' and not grounded(policy, index, source) and not (
@@ -188,8 +195,13 @@ def contracts(plan, cases, index, source, *, check_consistency=True):
                              'rejection case; if no checkable predicate can be expressed and nothing '
                              'promised rejection, declare input_contract status=none_documented with '
                              'its recorded evidence (or not_applicable for an operation without input)')
-        for check in policy.get('checks', []):
-            if not grounded(check, index, source) or not check.get('id') or check.get('channel') not in {'args', 'input_files'}:
+        raw_checks = policy.get('checks', [])
+        if not isinstance(raw_checks, list) or any(not isinstance(item, dict) for item in raw_checks):
+            raise ValueError('Input checks must be objects')
+        for check in raw_checks:
+            if (not grounded(check, index, source) or not isinstance(check.get('id'), str) or not check['id']
+                    or not isinstance(check.get('channel'), str)
+                    or check['channel'] not in {'args', 'input_files'}):
                 raise ValueError('Input checks require grounded id/channel/key/pattern')
             if check['channel'] == 'args' and (type(check.get('key')) is not int or check['key'] < 0):
                 raise ValueError('Argument check key must be a nonnegative index')
@@ -204,6 +216,8 @@ def contracts(plan, cases, index, source, *, check_consistency=True):
         if len(checks) != len(policy.get('checks', [])):
             raise ValueError('Input check IDs must be unique')
         operations = policy.get('operations', [])
+        if not isinstance(operations, list) or any(not isinstance(item, dict) for item in operations):
+            raise ValueError('Acceptance operations must be objects')
         used, names = set(), set()
         for operation in operations:
             if not grounded(operation, index, source) or not operation.get('id') or operation['id'] in names:
@@ -218,7 +232,12 @@ def contracts(plan, cases, index, source, *, check_consistency=True):
                         or item['equals'] not in operation['source_quote']):
                     raise ValueError('Operation selector must match a literal documented invocation token')
             selected = operation.get('checks')
-            state = (operation.get('input_contract') or {}).get('status')
+            if isinstance(selected, list) and any(not isinstance(item, str) for item in selected):
+                raise ValueError('Operation checks must be check ids (strings)')
+            contract = operation.get('input_contract')
+            if contract is not None and not isinstance(contract, dict):
+                raise ValueError('input_contract must be an object')
+            state = (contract or {}).get('status')
             if state is not None and state != 'required' and selected:
                 raise ValueError('Operation checks describe a constraint, so that operation must be required')
             if state in ('not_applicable', 'none_documented'):
@@ -238,7 +257,9 @@ def contracts(plan, cases, index, source, *, check_consistency=True):
                                      'operation none_documented or block with the missing predicate')
             elif not isinstance(selected, list) or not selected or not set(selected) <= checks.keys():
                 raise ValueError('Each input operation must apply named input checks; no per-case exemptions')
-            if not operation.get('purposes') or not set(operation['purposes']) <= set(policy['purposes']):
+            if (not isinstance(operation.get('purposes'), list) or not operation['purposes']
+                    or any(not isinstance(item, str) for item in operation['purposes'])
+                    or not set(operation['purposes']) <= set(policy['purposes'])):
                 raise ValueError('Operation business purposes must belong to declared scope')
             if type(operation.get('require_persistence', False)) is not bool:
                 raise ValueError('require_persistence must be boolean')
