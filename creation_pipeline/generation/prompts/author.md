@@ -60,6 +60,11 @@ A check needs a result assertion, not an exit code alone: every check, including
 rejection check, must assert observable output (stdout_contains, json_equals or a
 nonempty artifact). "expected_exit only" is rejected by the delivery validator and
 counts as a failed author turn.
+When you document a rejection, the delivered code must implement it: never rely on an
+upstream parser to reject a value. In particular an empty or whitespace-only input is
+often accepted by a parser as an empty value, so check it explicitly and exit with the
+documented code. A rejection case must use an input that actually triggers the
+documented behaviour.
 evidence is one registered source locator ID string (for example e1), not an array;
 explain the inspected source passage and expected behavior in purpose.
 {python},{package},{run},{source:ID} are check-only macros. Explicitly group/select continuous
