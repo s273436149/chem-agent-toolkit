@@ -66,6 +66,8 @@ its own input_contract; a required operation needs one rejection case per named 
 while none_documented and not_applicable operations need none. A required state without
 any named check is rejected: add a check plus its rejection case, or declare
 none_documented with its recorded evidence.
+Every quotation must keep the source wording verbatim: line wrapping, indentation and
+other whitespace may differ from the file, the words and their order may not.
 - required: the caller, the delivered interface (a wrapper's own error branch counts)
   or the source states a constraint. Give constraint and at least one named check,
   plus one real rejection case per check. Upstream silence never waives a delivered

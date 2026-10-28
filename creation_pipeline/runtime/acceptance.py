@@ -147,17 +147,41 @@ def consistency(cases):
     return conflicts
 
 
+def _normalise_quotes(text):
+    return ' '.join(text.split())
+
+
+def quote_matches(text, quote):
+    """How a citation matches the material: exact, whitespace-only, or not at all.
+
+    The wording must be verbatim in every accepted mode. Line wrapping, indentation
+    and other whitespace differences are tolerated because a model reproducing a
+    passage cannot be expected to keep the author's formatting byte for byte; the
+    match mode is recorded so a normalised citation stays visible in the evidence.
+    """
+    if not isinstance(quote, str) or not quote.strip():
+        return None
+    if quote in text:
+        return 'exact'
+    normalised = _normalise_quotes(quote)
+    if normalised and normalised in _normalise_quotes(text):
+        return 'normalized'
+    return None
+
+
 def grounded(record, index, source):
     if not isinstance(record, dict):
         return False
     path, quote = record.get('source_path'), record.get('source_quote')
-    if path not in index.get('read_files', index['files']) or not isinstance(quote, str) or not quote.strip():
+    if path not in index.get('read_files', index['files']):
         return False
     target = (Path(source) / path).resolve()
     if not target.exists() and (path.startswith('entry/') or path == 'source-identities.json'):
         # Frozen deterministic materials live outside the delivery/source trees.
         target = (Path(source) / 'runtime/context' / path).resolve()
-    return target.is_relative_to(Path(source).resolve()) and quote in target.read_text(encoding='utf-8')
+    if not target.is_relative_to(Path(source).resolve()) or not target.is_file():
+        return False
+    return quote_matches(target.read_text(encoding='utf-8'), quote) is not None
 
 
 def contracts(plan, cases, index, source, *, check_consistency=True):
@@ -275,7 +299,16 @@ def contracts(plan, cases, index, source, *, check_consistency=True):
         if contract is None:
             continue
         if not grounded(contract, index, source):
-            raise ValueError('Case acceptance requires an exact quotation from read source')
+            raise ValueError('Case acceptance requires a verbatim quotation from read source')
+        # Record a whitespace-only match so a normalised citation stays visible.
+        path = contract.get('source_path')
+        target = Path(source) / str(path)
+        if not target.is_file() and isinstance(path, str) and path.startswith('entry/'):
+            target = Path(source) / 'runtime/context' / path
+        if target.is_file():
+            mode = quote_matches(target.read_text(encoding='utf-8'), contract.get('source_quote'))
+            if mode:
+                contract['quote_match'] = mode
         if contract.get('purpose') not in {'computation', 'operation', 'report', 'input_rejection'}:
             raise ValueError('Unknown acceptance purpose')
         assertion = contract.get('assertion')
