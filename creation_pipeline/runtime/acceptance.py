@@ -300,15 +300,6 @@ def contracts(plan, cases, index, source, *, check_consistency=True):
             continue
         if not grounded(contract, index, source):
             raise ValueError('Case acceptance requires a verbatim quotation from read source')
-        # Record a whitespace-only match so a normalised citation stays visible.
-        path = contract.get('source_path')
-        target = Path(source) / str(path)
-        if not target.is_file() and isinstance(path, str) and path.startswith('entry/'):
-            target = Path(source) / 'runtime/context' / path
-        if target.is_file():
-            mode = quote_matches(target.read_text(encoding='utf-8'), contract.get('source_quote'))
-            if mode:
-                contract['quote_match'] = mode
         if contract.get('purpose') not in {'computation', 'operation', 'report', 'input_rejection'}:
             raise ValueError('Unknown acceptance purpose')
         assertion = contract.get('assertion')
