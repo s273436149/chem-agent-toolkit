@@ -114,7 +114,7 @@ def load_config(path):
     model = config.get("model", {})
     if isinstance(model, str):
         model = {"name": model}
-    if not isinstance(model, dict) or set(model) - {"backend", "name", "transport", "reasoning_effort", "service_tier", "api_model", "api_connect_retries"}:
+    if not isinstance(model, dict) or set(model) - {"backend", "name", "transport", "reasoning_effort", "service_tier", "api_model", "api_connect_retries", "api_retries"}:
         raise ValueError("model supports only backend, name, transport, reasoning_effort, service_tier and api_model")
     if model.get("backend", "codex_cli") not in ("codex_cli", "deepseek_api"):
         raise ValueError("model.backend must be codex_cli (native Codex turns) or deepseek_api "
@@ -133,6 +133,10 @@ def load_config(path):
         value = model["api_connect_retries"]
         if type(value) is not int or not 0 <= value <= 2:
             raise ValueError("model.api_connect_retries must be an integer between 0 and 2")
+    if model.get("api_retries") is not None:
+        value = model["api_retries"]
+        if type(value) is not int or not 0 <= value <= 3:
+            raise ValueError("model.api_retries must be an integer between 0 and 3")
     model.setdefault("backend", "codex_cli")
     config["model"] = model
     execution = config.setdefault("execution", {"profile": "production"})

@@ -20,7 +20,8 @@
     "service_tier": "default",
     "backend": "deepseek_api",
     "api_model": "deepseek-v4-pro",
-    "api_connect_retries": 1
+    "api_connect_retries": 1,
+    "api_retries": 1
   },
   "execution": {
     "profile": "production",
@@ -40,7 +41,7 @@
     "options": {
       "backend": "deepseek_api",
       "api_model": "deepseek-v4-pro",
-      "api_retries": 0,
+      "api_retries": 1,
       "api_stream": true,
       "api_max_output_tokens": 65536,
       "pin_base_image": true,
