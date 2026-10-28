@@ -231,8 +231,15 @@ def contracts(plan, cases, index, source, *, check_consistency=True):
                 raise ValueError('Argument check key must be a nonnegative index')
             if check['channel'] == 'input_files' and not isinstance(check.get('key'), str):
                 raise ValueError('File check key must be a path')
-            re.compile(check['pattern'])
-            if check.get('mode', 'full_text') not in {'full_text', 'each_line'}:
+            if not isinstance(check.get('pattern'), str):
+                raise ValueError('Input check ' + str(check.get('id')) + ' needs a pattern string')
+            try:
+                re.compile(check['pattern'])
+            except re.error as exc:
+                # A malformed regex is a repairable plan error, never a crash (run 39).
+                raise ValueError('Input check ' + str(check.get('id'))
+                                 + ' pattern is not a valid regular expression: ' + str(exc)) from exc
+            if not isinstance(check.get('mode', 'full_text'), str) or check.get('mode', 'full_text') not in {'full_text', 'each_line'}:
                 raise ValueError('Input check mode must be full_text or each_line')
             if check.get('mode') == 'each_line' and check['channel'] != 'input_files':
                 raise ValueError('each_line applies only to fixture contents')
