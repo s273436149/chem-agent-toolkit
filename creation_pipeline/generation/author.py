@@ -71,7 +71,10 @@ def review(session, plan, artifact, checks, config=None):
             'binding_verified=true requires a real API/source relationship, exact source quote, correct invocation and scope, '
             'standalone code or a clearly callable function with all context/supports present. Do not accept name similarity '
             'or the proposer claim alone. Inspect the code and source. Markdown extraction must not rewrite business code. '
-            'Distinguish carrier_repository from upstream and use snapshot identity when upstream version is unknown.')
+            'Distinguish carrier_repository from upstream and use snapshot identity when upstream version is unknown. '
+            'binding_verified judges only the source-to-entry relationship and its invocation. A licence, attribution '
+            'or documentation observation is a non-blocking content finding: report it, but it must not clear '
+            'binding_verified and must not by itself make the review fail.')
     instructions += "\nIndependently assess the supplied execution_requirement against actual source and delivered behavior. Return requirement_assessment=confirmed only when status and citations support it without conflicting execution needs. Missing declaration is unknown. An empty test list is never proof that execution is unnecessary."
     instructions += "\nReturn execution_gaps as test names only for confirmed external prerequisite gaps, never missing delivered modules or incorrect results. Return oracle_changes_verified. When oracle_changes exist, independently check each old/new assertion against original sources. True only for justified source-backed corrections, never observed-output matching. Explain the evidence in findings. With no changes return false."
     result = session.stage(instructions, {"oracle_changes": (config or {}).get("_oracle_changes", []), "_phase": "review",
